@@ -56,8 +56,8 @@ public class TermsQuery extends MultiTermQuery implements Accountable {
    * @param toField The field that should contain terms that are specified in the next parameter.
    * @param terms The terms that matching documents should have. The terms must be sorted by natural
    *     order.
-   * @param fromField
-   * @param fromQuery
+   * @param fromField from field
+   * @param fromQuery from query
    * @param indexReaderContextId Refers to the top level index reader used to create the set of
    *     terms in the previous parameter.
    */

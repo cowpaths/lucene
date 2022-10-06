@@ -26,7 +26,7 @@ import org.apache.lucene.search.SimpleCollector;
 
 /**
  * DocValuesTermsCollector
- * @param <DV>
+ * @param <DV> value type
  */
 public abstract class DocValuesTermsCollector<DV> extends SimpleCollector {
   @FunctionalInterface
@@ -42,7 +42,7 @@ public abstract class DocValuesTermsCollector<DV> extends SimpleCollector {
 
   /**
    * Initialization
-   * @param docValuesCall
+   * @param docValuesCall doc value callback
    */
   public DocValuesTermsCollector(Function<DV> docValuesCall) {
     this.docValuesCall = docValuesCall;
