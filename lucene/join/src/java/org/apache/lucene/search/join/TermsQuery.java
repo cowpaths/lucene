@@ -51,9 +51,13 @@ public class TermsQuery extends MultiTermQuery implements Accountable {
   private final long ramBytesUsed; // cache
 
   /**
+   *  A query that has an array of terms from a specific field. This query will match documents have
+   *  one or more terms in the specified field that match with the terms specified in the array.
    * @param toField The field that should contain terms that are specified in the next parameter.
    * @param terms The terms that matching documents should have. The terms must be sorted by natural
    *     order.
+   * @param fromField
+   * @param fromQuery
    * @param indexReaderContextId Refers to the top level index reader used to create the set of
    *     terms in the previous parameter.
    */

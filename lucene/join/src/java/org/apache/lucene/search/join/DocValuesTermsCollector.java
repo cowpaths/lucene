@@ -24,15 +24,26 @@ import org.apache.lucene.index.SortedDocValues;
 import org.apache.lucene.index.SortedSetDocValues;
 import org.apache.lucene.search.SimpleCollector;
 
+/**
+ * DocValuesTermsCollector
+ * @param <DV>
+ */
 public abstract class DocValuesTermsCollector<DV> extends SimpleCollector {
   @FunctionalInterface
   static interface Function<R> {
     R apply(LeafReader t) throws IOException;
   }
 
+  /**
+   * docvalues
+   */
   protected DV docValues;
   private final Function<DV> docValuesCall;
 
+  /**
+   * Initialization
+   * @param docValuesCall
+   */
   public DocValuesTermsCollector(Function<DV> docValuesCall) {
     this.docValuesCall = docValuesCall;
   }
