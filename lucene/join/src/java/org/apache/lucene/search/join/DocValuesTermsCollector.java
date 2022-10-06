@@ -58,6 +58,11 @@ public abstract class DocValuesTermsCollector<DV> extends SimpleCollector {
     return (ctx) -> DocValues.getSorted(ctx, field);
   }
 
+  /**
+   * get function for sorted set doc values
+   * @param field string fields
+   * @return return func for sorted doc values
+   */
   public static Function<SortedSetDocValues> sortedSetDocValues(String field) {
     return (ctx) -> DocValues.getSortedSet(ctx, field);
   }
