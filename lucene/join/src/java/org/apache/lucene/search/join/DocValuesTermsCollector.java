@@ -60,6 +60,7 @@ public abstract class DocValuesTermsCollector<DV> extends SimpleCollector {
 
   /**
    * get function for sorted set doc values
+   *
    * @param field string fields
    * @return return func for sorted doc values
    */
