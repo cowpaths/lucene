@@ -26,6 +26,7 @@ import org.apache.lucene.search.SimpleCollector;
 
 /**
  * DocValuesTermsCollector
+ *
  * @param <DV> value type
  */
 public abstract class DocValuesTermsCollector<DV> extends SimpleCollector {
@@ -34,14 +35,14 @@ public abstract class DocValuesTermsCollector<DV> extends SimpleCollector {
     R apply(LeafReader t) throws IOException;
   }
 
-  /**
-   * docvalues
-   */
+  /** docvalues */
   protected DV docValues;
+
   private final Function<DV> docValuesCall;
 
   /**
    * Initialization
+   *
    * @param docValuesCall doc value callback
    */
   public DocValuesTermsCollector(Function<DV> docValuesCall) {
