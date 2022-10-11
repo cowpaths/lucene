@@ -24,7 +24,13 @@ pluginManagement {
 
 rootProject.name = "lucene-root"
 
-includeBuild("dev-tools/missing-doclet")
+def folder = new File( 'dev-tools/solr-missing-doclet' )
+
+if( folder.exists() ) {
+    includeBuild("../dev-tools/solr-missing-doclet")
+} else {
+    includeBuild("dev-tools/missing-doclet")
+}
 
 include "lucene:analysis:common"
 include "lucene:analysis:icu"
