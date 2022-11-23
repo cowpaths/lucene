@@ -24,16 +24,27 @@ import org.apache.lucene.index.SortedDocValues;
 import org.apache.lucene.index.SortedSetDocValues;
 import org.apache.lucene.search.SimpleCollector;
 
-abstract class DocValuesTermsCollector<DV> extends SimpleCollector {
-
+/**
+ * DocValuesTermsCollector
+ *
+ * @param <DV> value type
+ */
+public abstract class DocValuesTermsCollector<DV> extends SimpleCollector {
   @FunctionalInterface
   static interface Function<R> {
     R apply(LeafReader t) throws IOException;
   }
 
+  /** docvalues */
   protected DV docValues;
+
   private final Function<DV> docValuesCall;
 
+  /**
+   * Initialization
+   *
+   * @param docValuesCall doc value callback
+   */
   public DocValuesTermsCollector(Function<DV> docValuesCall) {
     this.docValuesCall = docValuesCall;
   }
@@ -47,7 +58,13 @@ abstract class DocValuesTermsCollector<DV> extends SimpleCollector {
     return (ctx) -> DocValues.getSorted(ctx, field);
   }
 
-  static Function<SortedSetDocValues> sortedSetDocValues(String field) {
+  /**
+   * get function for sorted set doc values
+   *
+   * @param field string fields
+   * @return return func for sorted doc values
+   */
+  public static Function<SortedSetDocValues> sortedSetDocValues(String field) {
     return (ctx) -> DocValues.getSortedSet(ctx, field);
   }
 }
