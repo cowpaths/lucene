@@ -24,7 +24,7 @@ import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.search.TwoPhaseIterator;
 
 /** Common super class for multiple sub spans required in a document. */
-abstract class ConjunctionSpans extends Spans {
+public abstract class ConjunctionSpans extends Spans {
   final Spans[] subSpans; // in query order
   final DocIdSetIterator conjunction; // use to move to next doc with all clauses
   boolean atFirstInCurrentDoc; // a first start position is available in current doc for
@@ -111,7 +111,7 @@ abstract class ConjunctionSpans extends Spans {
     return subSpans;
   }
 
-  private static DocIdSetIterator intersectSpans(List<Spans> spanList) {
+  public static DocIdSetIterator intersectSpans(List<Spans> spanList) {
     if (spanList.size() < 2) {
       throw new IllegalArgumentException("Cannot make a ConjunctionDISI of less than 2 iterators");
     }
