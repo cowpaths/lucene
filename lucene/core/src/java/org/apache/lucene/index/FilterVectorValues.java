@@ -19,16 +19,15 @@ package org.apache.lucene.index;
 
 import java.io.IOException;
 import java.util.Objects;
-import org.apache.lucene.util.BytesRef;
 
-/** Delegates all methods to a wrapped {@link VectorValues}. */
+/** Delegates all methods to a wrapped {@link FloatVectorValues}. */
 public abstract class FilterVectorValues extends VectorValues {
 
   /** Wrapped values */
-  protected final VectorValues in;
+  protected final FloatVectorValues in;
 
   /** Sole constructor */
-  protected FilterVectorValues(VectorValues in) {
+  protected FilterVectorValues(FloatVectorValues in) {
     Objects.requireNonNull(in);
     this.in = in;
   }
@@ -49,11 +48,6 @@ public abstract class FilterVectorValues extends VectorValues {
   }
 
   @Override
-  public long cost() {
-    return in.cost();
-  }
-
-  @Override
   public int dimension() {
     return in.dimension();
   }
@@ -66,10 +60,5 @@ public abstract class FilterVectorValues extends VectorValues {
   @Override
   public float[] vectorValue() throws IOException {
     return in.vectorValue();
-  }
-
-  @Override
-  public BytesRef binaryValue() throws IOException {
-    return in.binaryValue();
   }
 }

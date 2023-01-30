@@ -18,6 +18,7 @@ package org.apache.lucene.search;
 
 import java.io.IOException;
 import java.util.Objects;
+import org.apache.lucene.document.KnnFloatVectorField;
 import org.apache.lucene.index.DocValues;
 import org.apache.lucene.index.DocValuesType;
 import org.apache.lucene.index.FieldInfo;
@@ -30,8 +31,8 @@ import org.apache.lucene.index.PointValues;
 import org.apache.lucene.index.Terms;
 
 /**
- * A {@link Query} that matches documents that contain either a {@link
- * org.apache.lucene.document.KnnVectorField}, or a field that indexes norms or doc values.
+ * A {@link Query} that matches documents that contain either a {@link KnnFloatVectorField}, {@link
+ * org.apache.lucene.document.KnnByteVectorField} or a field that indexes norms or doc values.
  */
 public class FieldExistsQuery extends Query {
   private String field;
@@ -126,7 +127,19 @@ public class FieldExistsQuery extends Query {
           break;
         }
       } else if (fieldInfo.getVectorDimension() != 0) { // the field indexes vectors
-        if (leaf.getVectorValues(field).size() != leaf.maxDoc()) {
+        final int numVectors;
+        switch (fieldInfo.getVectorEncoding()) {
+          case FLOAT32:
+            numVectors = leaf.getFloatVectorValues(field).size();
+            break;
+          case BYTE:
+            numVectors = leaf.getByteVectorValues(field).size();
+            break;
+          default:
+            throw new IllegalArgumentException(
+                "unknown vector encoding=" + fieldInfo.getVectorEncoding());
+        }
+        if (numVectors != leaf.maxDoc()) {
           allReadersRewritable = false;
           break;
         }
@@ -178,7 +191,17 @@ public class FieldExistsQuery extends Query {
         if (fieldInfo.hasNorms()) { // the field indexes norms
           iterator = context.reader().getNormValues(field);
         } else if (fieldInfo.getVectorDimension() != 0) { // the field indexes vectors
-          iterator = context.reader().getVectorValues(field);
+          switch (fieldInfo.getVectorEncoding()) {
+            case FLOAT32:
+              iterator = context.reader().getFloatVectorValues(field);
+              break;
+            case BYTE:
+              iterator = context.reader().getByteVectorValues(field);
+              break;
+            default:
+              throw new IllegalArgumentException(
+                  "unknown vector encoding=" + fieldInfo.getVectorEncoding());
+          }
         } else if (fieldInfo.getDocValuesType()
             != DocValuesType.NONE) { // the field indexes doc values
           switch (fieldInfo.getDocValuesType()) {
@@ -234,9 +257,11 @@ public class FieldExistsQuery extends Query {
             != DocValuesType.NONE) { // the field indexes doc values
           if (reader.hasDeletions() == false) {
             if (fieldInfo.getPointDimensionCount() > 0) {
-              return reader.getPointValues(field).getDocCount();
+              PointValues pointValues = reader.getPointValues(field);
+              return pointValues == null ? 0 : pointValues.getDocCount();
             } else if (fieldInfo.getIndexOptions() != IndexOptions.NONE) {
-              return reader.terms(field).getDocCount();
+              Terms terms = reader.terms(field);
+              return terms == null ? 0 : terms.getDocCount();
             }
           }
 

@@ -39,7 +39,9 @@ import org.apache.lucene.store.IOContext;
  *
  * @see IndexRevision
  * @lucene.experimental
+ * @deprecated use org.apache.lucene.replicator.nrt instead
  */
+@Deprecated
 public class IndexAndTaxonomyRevision implements Revision {
 
   /**
@@ -68,7 +70,9 @@ public class IndexAndTaxonomyRevision implements Revision {
       super(directory, openMode);
     }
 
-    /** @see DirectoryTaxonomyWriter#DirectoryTaxonomyWriter(Directory) */
+    /**
+     * @see DirectoryTaxonomyWriter#DirectoryTaxonomyWriter(Directory)
+     */
     public SnapshotDirectoryTaxonomyWriter(Directory d) throws IOException {
       super(d);
     }

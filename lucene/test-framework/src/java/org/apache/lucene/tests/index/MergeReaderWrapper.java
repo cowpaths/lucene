@@ -25,11 +25,13 @@ import org.apache.lucene.codecs.NormsProducer;
 import org.apache.lucene.codecs.StoredFieldsReader;
 import org.apache.lucene.codecs.TermVectorsReader;
 import org.apache.lucene.index.BinaryDocValues;
+import org.apache.lucene.index.ByteVectorValues;
 import org.apache.lucene.index.CodecReader;
 import org.apache.lucene.index.DocValuesType;
 import org.apache.lucene.index.FieldInfo;
 import org.apache.lucene.index.FieldInfos;
 import org.apache.lucene.index.Fields;
+import org.apache.lucene.index.FloatVectorValues;
 import org.apache.lucene.index.LeafMetaData;
 import org.apache.lucene.index.LeafReader;
 import org.apache.lucene.index.NumericDocValues;
@@ -38,9 +40,9 @@ import org.apache.lucene.index.SortedDocValues;
 import org.apache.lucene.index.SortedNumericDocValues;
 import org.apache.lucene.index.SortedSetDocValues;
 import org.apache.lucene.index.StoredFieldVisitor;
+import org.apache.lucene.index.StoredFields;
+import org.apache.lucene.index.TermVectors;
 import org.apache.lucene.index.Terms;
-import org.apache.lucene.index.VectorValues;
-import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.search.TopDocs;
 import org.apache.lucene.util.Bits;
 
@@ -214,13 +216,28 @@ class MergeReaderWrapper extends LeafReader {
   }
 
   @Override
+  public TermVectors termVectors() throws IOException {
+    ensureOpen();
+    if (vectors == null) {
+      return TermVectors.EMPTY;
+    } else {
+      return vectors;
+    }
+  }
+
+  @Override
   public PointValues getPointValues(String fieldName) throws IOException {
     return in.getPointValues(fieldName);
   }
 
   @Override
-  public VectorValues getVectorValues(String fieldName) throws IOException {
-    return in.getVectorValues(fieldName);
+  public FloatVectorValues getFloatVectorValues(String fieldName) throws IOException {
+    return in.getFloatVectorValues(fieldName);
+  }
+
+  @Override
+  public ByteVectorValues getByteVectorValues(String fieldName) throws IOException {
+    return in.getByteVectorValues(fieldName);
   }
 
   @Override
@@ -230,9 +247,9 @@ class MergeReaderWrapper extends LeafReader {
   }
 
   @Override
-  public TopDocs searchNearestVectorsExhaustively(
-      String field, float[] target, int k, DocIdSetIterator acceptDocs) throws IOException {
-    return in.searchNearestVectorsExhaustively(field, target, k, acceptDocs);
+  public TopDocs searchNearestVectors(
+      String field, byte[] target, int k, Bits acceptDocs, int visitedLimit) throws IOException {
+    return in.searchNearestVectors(field, target, k, acceptDocs, visitedLimit);
   }
 
   @Override
@@ -249,7 +266,13 @@ class MergeReaderWrapper extends LeafReader {
   public void document(int docID, StoredFieldVisitor visitor) throws IOException {
     ensureOpen();
     checkBounds(docID);
-    store.visitDocument(docID, visitor);
+    store.document(docID, visitor);
+  }
+
+  @Override
+  public StoredFields storedFields() throws IOException {
+    ensureOpen();
+    return store;
   }
 
   @Override

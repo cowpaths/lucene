@@ -24,20 +24,28 @@ import java.io.IOException;
  * @see LocalReplicator#DEFAULT_SESSION_EXPIRATION_THRESHOLD
  * @see LocalReplicator#setExpirationThreshold(long)
  * @lucene.experimental
+ * @deprecated use org.apache.lucene.replicator.nrt instead
  */
+@Deprecated
 public class SessionExpiredException extends IOException {
 
-  /** @see IOException#IOException(String, Throwable) */
+  /**
+   * @see IOException#IOException(String, Throwable)
+   */
   public SessionExpiredException(String message, Throwable cause) {
     super(message, cause);
   }
 
-  /** @see IOException#IOException(String) */
+  /**
+   * @see IOException#IOException(String)
+   */
   public SessionExpiredException(String message) {
     super(message);
   }
 
-  /** @see IOException#IOException(Throwable) */
+  /**
+   * @see IOException#IOException(Throwable)
+   */
   public SessionExpiredException(Throwable cause) {
     super(cause);
   }
