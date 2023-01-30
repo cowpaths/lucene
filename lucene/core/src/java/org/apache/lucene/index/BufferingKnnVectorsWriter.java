@@ -88,12 +88,6 @@ public abstract class BufferingKnnVectorsWriter extends KnnVectorsWriter {
                 String field, float[] target, int k, Bits acceptDocs, int visitedLimit) {
               throw new UnsupportedOperationException();
             }
-
-            @Override
-            public TopDocs searchExhaustively(
-                String field, float[] target, int k, DocIdSetIterator acceptDocs) {
-              throw new UnsupportedOperationException();
-            }
           };
 
       writeField(fieldData.fieldInfo, knnVectorsReader, maxDoc);
@@ -125,12 +119,6 @@ public abstract class BufferingKnnVectorsWriter extends KnnVectorsWriter {
           @Override
           public TopDocs search(
               String field, float[] target, int k, Bits acceptDocs, int visitedLimit) {
-            throw new UnsupportedOperationException();
-          }
-
-          @Override
-          public TopDocs searchExhaustively(
-              String field, float[] target, int k, DocIdSetIterator acceptDocs) {
             throw new UnsupportedOperationException();
           }
 
@@ -208,8 +196,10 @@ public abstract class BufferingKnnVectorsWriter extends KnnVectorsWriter {
       if (vectors.size() == 0) return 0;
       return docsWithField.ramBytesUsed()
           + vectors.size()
-              * (RamUsageEstimator.NUM_BYTES_OBJECT_REF + RamUsageEstimator.NUM_BYTES_ARRAY_HEADER)
-          + vectors.size() * dim * Float.BYTES;
+              * (long)
+                  (RamUsageEstimator.NUM_BYTES_OBJECT_REF
+                      + RamUsageEstimator.NUM_BYTES_ARRAY_HEADER)
+          + vectors.size() * (long) dim * Float.BYTES;
     }
   }
 

@@ -37,7 +37,6 @@ import org.apache.lucene.document.FieldType;
 import org.apache.lucene.index.*;
 import org.apache.lucene.search.Collector;
 import org.apache.lucene.search.CollectorManager;
-import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.Scorable;
@@ -235,8 +234,8 @@ public class MemoryIndex {
     final int maxBufferedByteBlocks = (int) ((maxReusedBytes / 2) / ByteBlockPool.BYTE_BLOCK_SIZE);
     final int maxBufferedIntBlocks =
         (int)
-            ((maxReusedBytes - (maxBufferedByteBlocks * ByteBlockPool.BYTE_BLOCK_SIZE))
-                / (IntBlockPool.INT_BLOCK_SIZE * Integer.BYTES));
+            ((maxReusedBytes - (maxBufferedByteBlocks * (long) ByteBlockPool.BYTE_BLOCK_SIZE))
+                / (IntBlockPool.INT_BLOCK_SIZE * (long) Integer.BYTES));
     assert (maxBufferedByteBlocks * ByteBlockPool.BYTE_BLOCK_SIZE)
             + (maxBufferedIntBlocks * IntBlockPool.INT_BLOCK_SIZE * Integer.BYTES)
         <= maxReusedBytes;
@@ -1372,12 +1371,6 @@ public class MemoryIndex {
     @Override
     public TopDocs searchNearestVectors(
         String field, float[] target, int k, Bits acceptDocs, int visitedLimit) {
-      return null;
-    }
-
-    @Override
-    public TopDocs searchNearestVectorsExhaustively(
-        String field, float[] target, int k, DocIdSetIterator acceptDocs) {
       return null;
     }
 

@@ -58,10 +58,17 @@ allprojects { prj ->
       }
 
       tasks.withType(JavaCompile) { task ->
+        // TODO: Better way to disable on our MR-JAR
+        if (task.name == 'compileMain19Java') {
+          options.errorprone.enabled = false
+          return
+        }
+
         task.dependsOn ":checkJdkInternalsExportedToGradle"
 
         options.errorprone.disableWarningsInGeneratedCode = true
         options.errorprone.errorproneArgs = [
+            '-XepAllErrorsAsWarnings', // warnings still fail build by default, but allows usage of -Pjavac.failOnWarnings=false
             '-Xep:InlineMeSuggester:OFF', // We don't use this annotation
 
             // test

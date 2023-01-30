@@ -3,6 +3,34 @@ Lucene Change Log
 For more information on past and future Lucene versions, please see:
 http://s.apache.org/luceneversions
 
+======================== Lucene 9.4.2 =======================
+
+Bug Fixes
+---------------------
+* GITHUB#11905: Fix integer overflow when seeking the vector index for connections in a single segment.
+ This addresses a bug that was introduced in 9.2.0 where having many vectors is not handled well
+ in the vector connections reader.
+
+* GITHUB#11939: Fix incorrect cost calculation in DocIdSetBuilder after upgradeToBitSet when doc list is growing.
+  This addresses a bug where the cost of TermRangeQuery/TermInSetQuery and some other queries will be highly underestimated.
+
+Improvements
+---------------------
+* GITHUB#11912, GITHUB#11918: Port generic exception handling from MemorySegmentIndexInput
+  to ByteBufferIndexInput. This also adds the invalid position while seeking or reading
+  to the exception message. Allows better debugging and analysis of bugs like GITHUB#11905.
+  (Uwe Schindler, Robert Muir)
+
+* GITHUB#11916: improve checkindex to be more thorough for vectors. (Ben Trent)
+
+======================== Lucene 9.4.1 =======================
+
+Bug Fixes
+---------------------
+* GITHUB#11858: Fix kNN vectors format validation on large segments. This
+ addresses a regression in 9.4.0 where validation could fail, preventing
+ further writes or searches on the index. (Julie Tibshirani)
+
 ======================== Lucene 9.4.0 =======================
 
 API Changes
@@ -18,6 +46,15 @@ New Features
 * LUCENE-10633: SortField#setOptimizeSortWithIndexedData and
   SortField#getOptimizeSortWithIndexedData were introduced to provide
   an option to disable sort optimization for various sort fields. (Mayya Sharipova)
+
+* GITHUB#912: Support for Java 19 foreign memory support was added. Applications started
+  with command line parameter "java --enable-preview" will automatically use the new
+  foreign memory API of Java 19 to access indexes on disk with MMapDirectory. This is
+  an opt-in feature and requires explicit Java command line flag! When enabled, Lucene logs
+  a notice using java.util.logging. Please test thoroughly and report bugs/slowness to Lucene's
+  mailing list. When the new API is used, MMapDirectory will mmap Lucene indexes in chunks of
+  16 GiB (instead of 1 GiB) and indexes closed while queries are running can no longer crash
+  the JVM.  (Uwe Schindler)
 
 Improvements
 ---------------------
@@ -60,6 +97,10 @@ Bug Fixes
 
 * LUCENE-10665, GITHUB#11701: Fix classloading deadlock in analysis factories / AnalysisSPILoader
   initialization.  (Uwe Schindler)
+
+* LUCENE-10674: Ensure BitSetConjDISI returns NO_MORE_DOCS when sub-iterator exhausts. (Jack Mazanec)
+
+* GITHUB#11794: Guard FieldExistsQuery against null pointers (Luca Cavanna)
 
 Build
 ---------------------

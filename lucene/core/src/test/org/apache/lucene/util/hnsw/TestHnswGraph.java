@@ -17,9 +17,12 @@
 
 package org.apache.lucene.util.hnsw;
 
+import static com.carrotsearch.randomizedtesting.RandomizedTest.randomIntBetween;
 import static org.apache.lucene.search.DocIdSetIterator.NO_MORE_DOCS;
+import static org.apache.lucene.tests.util.RamUsageTester.ramUsed;
 import static org.apache.lucene.util.VectorUtil.toBytesRef;
 
+import com.carrotsearch.randomizedtesting.RandomizedTest;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -59,6 +62,7 @@ import org.apache.lucene.util.BitSet;
 import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.FixedBitSet;
+import org.apache.lucene.util.RamUsageEstimator;
 import org.apache.lucene.util.VectorUtil;
 import org.apache.lucene.util.hnsw.HnswGraph.NodesIterator;
 import org.junit.Before;
@@ -71,15 +75,8 @@ public class TestHnswGraph extends LuceneTestCase {
 
   @Before
   public void setup() {
-    similarityFunction =
-        VectorSimilarityFunction.values()[
-            random().nextInt(VectorSimilarityFunction.values().length - 1) + 1];
-    if (similarityFunction == VectorSimilarityFunction.DOT_PRODUCT) {
-      vectorEncoding =
-          VectorEncoding.values()[random().nextInt(VectorEncoding.values().length - 1) + 1];
-    } else {
-      vectorEncoding = VectorEncoding.FLOAT32;
-    }
+    similarityFunction = RandomizedTest.randomFrom(VectorSimilarityFunction.values());
+    vectorEncoding = RandomizedTest.randomFrom(VectorEncoding.values());
   }
 
   // test writing out and reading in a graph gives the expected graph
@@ -158,8 +155,7 @@ public class TestHnswGraph extends LuceneTestCase {
     int M = random().nextInt(10) + 5;
     int beamWidth = random().nextInt(10) + 5;
     VectorSimilarityFunction similarityFunction =
-        VectorSimilarityFunction.values()[
-            random().nextInt(VectorSimilarityFunction.values().length - 1) + 1];
+        RandomizedTest.randomFrom(VectorSimilarityFunction.values());
     long seed = random().nextLong();
     HnswGraphBuilder.randSeed = seed;
     IndexWriterConfig iwc =
@@ -475,6 +471,27 @@ public class TestHnswGraph extends LuceneTestCase {
                 0));
   }
 
+  public void testRamUsageEstimate() throws IOException {
+    int size = atLeast(2000);
+    int dim = randomIntBetween(100, 1024);
+    int M = randomIntBetween(4, 96);
+
+    VectorSimilarityFunction similarityFunction =
+        RandomizedTest.randomFrom(VectorSimilarityFunction.values());
+    VectorEncoding vectorEncoding = RandomizedTest.randomFrom(VectorEncoding.values());
+    TestHnswGraph.RandomVectorValues vectors =
+        new TestHnswGraph.RandomVectorValues(size, dim, vectorEncoding, random());
+
+    HnswGraphBuilder<?> builder =
+        HnswGraphBuilder.create(
+            vectors, vectorEncoding, similarityFunction, M, M * 2, random().nextLong());
+    OnHeapHnswGraph hnsw = builder.build(vectors.copy());
+    long estimated = RamUsageEstimator.sizeOfObject(hnsw);
+    long actual = ramUsed(hnsw);
+
+    assertEquals((double) actual, (double) estimated, (double) actual * 0.3);
+  }
+
   @SuppressWarnings("unchecked")
   public void testDiversity() throws IOException {
     vectorEncoding = randomVectorEncoding();
@@ -487,6 +504,7 @@ public class TestHnswGraph extends LuceneTestCase {
       unitVector2d(0.9),
       unitVector2d(0.8),
       unitVector2d(0.77),
+      unitVector2d(0.6)
     };
     if (vectorEncoding == VectorEncoding.BYTE) {
       for (float[] v : values) {
@@ -536,6 +554,78 @@ public class TestHnswGraph extends LuceneTestCase {
     assertLevel0Neighbors(builder.hnsw, 3, 1, 4);
     assertLevel0Neighbors(builder.hnsw, 4, 1, 3, 5);
     assertLevel0Neighbors(builder.hnsw, 5, 1, 4);
+  }
+
+  public void testDiversityFallback() throws IOException {
+    vectorEncoding = randomVectorEncoding();
+    similarityFunction = VectorSimilarityFunction.EUCLIDEAN;
+    // Some test cases can't be exercised in two dimensions;
+    // in particular if a new neighbor displaces an existing neighbor
+    // by being closer to the target, yet none of the existing neighbors is closer to the new vector
+    // than to the target -- ie they all remain diverse, so we simply drop the farthest one.
+    float[][] values = {
+      {0, 0, 0},
+      {0, 10, 0},
+      {0, 0, 20},
+      {10, 0, 0},
+      {0, 4, 0}
+    };
+    MockVectorValues vectors = new MockVectorValues(values);
+    // First add nodes until everybody gets a full neighbor list
+    HnswGraphBuilder<?> builder =
+        HnswGraphBuilder.create(
+            vectors, vectorEncoding, similarityFunction, 1, 10, random().nextInt());
+    // node 0 is added by the builder constructor
+    // builder.addGraphNode(vectors.vectorValue(0));
+    RandomAccessVectorValues vectorsCopy = vectors.copy();
+    builder.addGraphNode(1, vectorsCopy);
+    builder.addGraphNode(2, vectorsCopy);
+    assertLevel0Neighbors(builder.hnsw, 0, 1, 2);
+    // 2 is closer to 0 than 1, so it is excluded as non-diverse
+    assertLevel0Neighbors(builder.hnsw, 1, 0);
+    // 1 is closer to 0 than 2, so it is excluded as non-diverse
+    assertLevel0Neighbors(builder.hnsw, 2, 0);
+
+    builder.addGraphNode(3, vectorsCopy);
+    // this is one case we are testing; 2 has been displaced by 3
+    assertLevel0Neighbors(builder.hnsw, 0, 1, 3);
+    assertLevel0Neighbors(builder.hnsw, 1, 0);
+    assertLevel0Neighbors(builder.hnsw, 2, 0);
+    assertLevel0Neighbors(builder.hnsw, 3, 0);
+  }
+
+  public void testDiversity3d() throws IOException {
+    vectorEncoding = randomVectorEncoding();
+    similarityFunction = VectorSimilarityFunction.EUCLIDEAN;
+    // test the case when a neighbor *becomes* non-diverse when a newer better neighbor arrives
+    float[][] values = {
+      {0, 0, 0},
+      {0, 10, 0},
+      {0, 0, 20},
+      {0, 9, 0}
+    };
+    MockVectorValues vectors = new MockVectorValues(values);
+    // First add nodes until everybody gets a full neighbor list
+    HnswGraphBuilder<?> builder =
+        HnswGraphBuilder.create(
+            vectors, vectorEncoding, similarityFunction, 1, 10, random().nextInt());
+    // node 0 is added by the builder constructor
+    // builder.addGraphNode(vectors.vectorValue(0));
+    RandomAccessVectorValues vectorsCopy = vectors.copy();
+    builder.addGraphNode(1, vectorsCopy);
+    builder.addGraphNode(2, vectorsCopy);
+    assertLevel0Neighbors(builder.hnsw, 0, 1, 2);
+    // 2 is closer to 0 than 1, so it is excluded as non-diverse
+    assertLevel0Neighbors(builder.hnsw, 1, 0);
+    // 1 is closer to 0 than 2, so it is excluded as non-diverse
+    assertLevel0Neighbors(builder.hnsw, 2, 0);
+
+    builder.addGraphNode(3, vectorsCopy);
+    // this is one case we are testing; 1 has been displaced by 3
+    assertLevel0Neighbors(builder.hnsw, 0, 2, 3);
+    assertLevel0Neighbors(builder.hnsw, 1, 0, 3);
+    assertLevel0Neighbors(builder.hnsw, 2, 0);
+    assertLevel0Neighbors(builder.hnsw, 3, 0, 1);
   }
 
   private void assertLevel0Neighbors(OnHeapHnswGraph graph, int node, int... expected) {

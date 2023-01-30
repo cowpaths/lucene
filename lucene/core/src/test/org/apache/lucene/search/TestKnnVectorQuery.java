@@ -631,6 +631,49 @@ public class TestKnnVectorQuery extends LuceneTestCase {
     }
   }
 
+  /** Tests filtering when all vectors have the same score. */
+  @AwaitsFix(bugUrl = "https://github.com/apache/lucene/issues/11787")
+  public void testFilterWithSameScore() throws IOException {
+    int numDocs = 100;
+    int dimension = atLeast(5);
+    try (Directory d = newDirectory()) {
+      // Always use the default kNN format to have predictable behavior around when it hits
+      // visitedLimit. This is fine since the test targets KnnVectorQuery logic, not the kNN format
+      // implementation.
+      IndexWriterConfig iwc = new IndexWriterConfig().setCodec(TestUtil.getDefaultCodec());
+      IndexWriter w = new IndexWriter(d, iwc);
+      float[] vector = randomVector(dimension);
+      for (int i = 0; i < numDocs; i++) {
+        Document doc = new Document();
+        doc.add(new KnnVectorField("field", vector));
+        doc.add(new IntPoint("tag", i));
+        w.addDocument(doc);
+      }
+      w.forceMerge(1);
+      w.close();
+
+      try (DirectoryReader reader = DirectoryReader.open(d)) {
+        IndexSearcher searcher = newSearcher(reader);
+        int lower = random().nextInt(50);
+        int size = 5;
+
+        // Test a restrictive filter, which usually performs exact search
+        Query filter1 = IntPoint.newRangeQuery("tag", lower, lower + 6);
+        TopDocs results =
+            searcher.search(
+                new KnnVectorQuery("field", randomVector(dimension), size, filter1), size);
+        assertEquals(size, results.scoreDocs.length);
+
+        // Test an unrestrictive filter, which usually performs approximate search
+        Query filter2 = IntPoint.newRangeQuery("tag", lower, numDocs);
+        results =
+            searcher.search(
+                new KnnVectorQuery("field", randomVector(dimension), size, filter2), size);
+        assertEquals(size, results.scoreDocs.length);
+      }
+    }
+  }
+
   public void testDeletes() throws IOException {
     try (Directory dir = newDirectory();
         IndexWriter w = new IndexWriter(dir, newIndexWriterConfig())) {
@@ -791,7 +834,7 @@ public class TestKnnVectorQuery extends LuceneTestCase {
    */
   private Directory getStableIndexStore(String field, float[]... contents) throws IOException {
     Directory indexStore = newDirectory();
-    try (IndexWriter writer = new IndexWriter(indexStore, newIndexWriterConfig())) {
+    try (IndexWriter writer = new IndexWriter(indexStore, new IndexWriterConfig())) {
       VectorEncoding encoding = randomVectorEncoding();
       for (int i = 0; i < contents.length; ++i) {
         Document doc = new Document();
