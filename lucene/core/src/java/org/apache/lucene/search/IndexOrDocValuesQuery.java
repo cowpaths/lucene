@@ -162,15 +162,19 @@ public final class IndexOrDocValuesQuery extends Query {
         if (indexScorerSupplier == null || dvScorerSupplier == null) {
           return null;
         }
+        // baselines in the range of 63-65 (inclusive) are probably good here. Higher
+        // values privilege index query, lower values privilege docValues query.
+        final int high = 65 - Long.numberOfLeadingZeros(dvScorerSupplier.cost());
         return new ScorerSupplier() {
           @Override
           public Scorer get(long leadCost) throws IOException {
-            // At equal costs, doc values tend to be worse than points since they
-            // still need to perform one comparison per document while points can
-            // do much better than that given how values are organized. So we give
-            // an arbitrary 8x penalty to doc values.
-            final long threshold = cost() >>> 3;
-            if (threshold <= leadCost) {
+            // We decide based on selectivity of leadCost wrt our cost, relative
+            // to the selectivity of our cost wrt cost of dv equivalent. Previous
+            // heuristic only accounted for the former, which could result in
+            // missed opportunities to narrow the domain.
+            final int low = 63 - Long.numberOfLeadingZeros(leadCost);
+            final int test = 63 - Long.numberOfLeadingZeros(cost());
+            if (test - low <= high - test) {
               return indexScorerSupplier.get(leadCost);
             } else {
               return dvScorerSupplier.get(leadCost);

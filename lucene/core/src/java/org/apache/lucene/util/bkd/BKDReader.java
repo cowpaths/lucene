@@ -515,6 +515,10 @@ public class BKDReader extends PointValues {
         return sizeFromBalancedTree(leftMostLeafNode, rightMostLeafNode);
       }
       // size for an unbalanced tree.
+      // TODO: below ternary improves estimate, but always revises down, having the effect
+      //  of proportionally depressing the cost of low-cost iterators more than higher-cost
+      //  iterators. This is fine, but it uncovered some issues in the heuristics of
+      //  ConjunctionDISI and IndexOrDocValuesQuery.
       return rightMostLeafNode == this.rightMostLeafNode
           ? (long) (numLeaves - 1) * config.maxPointsInLeafNode + lastLeafNodePointCount
           : (long) numLeaves * config.maxPointsInLeafNode;
