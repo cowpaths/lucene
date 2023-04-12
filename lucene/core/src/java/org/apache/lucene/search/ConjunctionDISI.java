@@ -122,7 +122,7 @@ final class ConjunctionDISI extends DocIdSetIterator {
             if (next instanceof BitSetIterator) {
               bitSetIterators.add((BitSetIterator) next);
               next = candidate;
-            } else if (candidate.cost() < next.cost() >>> 3) {
+            } else if (candidate.cost() < next.cost() >>> 1) {
               iterators.add(candidate);
             } else {
               bitSetIterators.add((BitSetIterator) candidate);
