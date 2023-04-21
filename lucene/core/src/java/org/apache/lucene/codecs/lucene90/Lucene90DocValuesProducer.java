@@ -47,7 +47,6 @@ import org.apache.lucene.store.RandomAccessInput;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.LongValues;
-import org.apache.lucene.util.compress.LZ4;
 import org.apache.lucene.util.packed.DirectMonotonicReader;
 import org.apache.lucene.util.packed.DirectReader;
 
@@ -62,6 +61,7 @@ final class Lucene90DocValuesProducer extends DocValuesProducer {
   private final int maxDoc;
   private int version = -1;
   private final boolean merging;
+  private final SegmentReadState.Decompressor decompressor;
 
   /** expert: instantiates a new reader */
   Lucene90DocValuesProducer(
@@ -80,6 +80,7 @@ final class Lucene90DocValuesProducer extends DocValuesProducer {
     sortedSets = new HashMap<>();
     sortedNumerics = new HashMap<>();
     merging = false;
+    decompressor = state.decompressor;
 
     // read in the entries from the metadata file.
     try (ChecksumIndexInput in = state.directory.openChecksumInput(metaName, state.context)) {
@@ -144,6 +145,7 @@ final class Lucene90DocValuesProducer extends DocValuesProducer {
       Map<String, SortedSetEntry> sortedSets,
       Map<String, SortedNumericEntry> sortedNumerics,
       IndexInput data,
+      SegmentReadState.Decompressor decompressor,
       int maxDoc,
       int version,
       boolean merging) {
@@ -153,6 +155,7 @@ final class Lucene90DocValuesProducer extends DocValuesProducer {
     this.sortedSets = sortedSets;
     this.sortedNumerics = sortedNumerics;
     this.data = data.clone();
+    this.decompressor = decompressor;
     this.maxDoc = maxDoc;
     this.version = version;
     this.merging = merging;
@@ -161,7 +164,7 @@ final class Lucene90DocValuesProducer extends DocValuesProducer {
   @Override
   public DocValuesProducer getMergeInstance() {
     return new Lucene90DocValuesProducer(
-        numerics, binaries, sorted, sortedSets, sortedNumerics, data, maxDoc, version, true);
+        numerics, binaries, sorted, sortedSets, sortedNumerics, data, decompressor, maxDoc, version, true);
   }
 
   private void readFields(IndexInput meta, FieldInfos infos) throws IOException {
@@ -823,10 +826,10 @@ final class Lucene90DocValuesProducer extends DocValuesProducer {
   @Override
   public SortedDocValues getSorted(FieldInfo field) throws IOException {
     SortedEntry entry = sorted.get(field.name);
-    return getSorted(entry);
+    return getSorted(entry, field);
   }
 
-  private SortedDocValues getSorted(SortedEntry entry) throws IOException {
+  private SortedDocValues getSorted(SortedEntry entry, FieldInfo fieldInfo) throws IOException {
     // Specialize the common case for ordinals: single block of packed integers.
     final NumericEntry ordsEntry = entry.ordsEntry;
     if (ordsEntry.blockShift < 0 // single block
@@ -842,7 +845,7 @@ final class Lucene90DocValuesProducer extends DocValuesProducer {
           getDirectReaderInstance(slice, ordsEntry.bitsPerValue, 0L, ordsEntry.numValues);
 
       if (ordsEntry.docsWithFieldOffset == -1) { // dense
-        return new BaseSortedDocValues(entry) {
+        return new BaseSortedDocValues(entry, fieldInfo) {
 
           private final int maxDoc = Lucene90DocValuesProducer.this.maxDoc;
           private int doc = -1;
@@ -891,7 +894,7 @@ final class Lucene90DocValuesProducer extends DocValuesProducer {
                 ordsEntry.denseRankPower,
                 ordsEntry.numValues);
 
-        return new BaseSortedDocValues(entry) {
+        return new BaseSortedDocValues(entry, fieldInfo) {
 
           @Override
           public int ordValue() throws IOException {
@@ -927,7 +930,7 @@ final class Lucene90DocValuesProducer extends DocValuesProducer {
     }
 
     final NumericDocValues ords = getNumeric(entry.ordsEntry);
-    return new BaseSortedDocValues(entry) {
+    return new BaseSortedDocValues(entry, fieldInfo) {
 
       @Override
       public int ordValue() throws IOException {
@@ -965,9 +968,11 @@ final class Lucene90DocValuesProducer extends DocValuesProducer {
 
     final SortedEntry entry;
     final TermsEnum termsEnum;
+    final FieldInfo fieldInfo;
 
-    BaseSortedDocValues(SortedEntry entry) throws IOException {
+    BaseSortedDocValues(SortedEntry entry, FieldInfo fieldInfo) throws IOException {
       this.entry = entry;
+      this.fieldInfo = fieldInfo;
       this.termsEnum = termsEnum();
     }
 
@@ -997,7 +1002,7 @@ final class Lucene90DocValuesProducer extends DocValuesProducer {
 
     @Override
     public TermsEnum termsEnum() throws IOException {
-      return new TermsDict(entry.termsDictEntry, data);
+      return new TermsDict(entry.termsDictEntry, data, fieldInfo);
     }
   }
 
@@ -1005,11 +1010,13 @@ final class Lucene90DocValuesProducer extends DocValuesProducer {
 
     final SortedSetEntry entry;
     final IndexInput data;
+    final FieldInfo fieldInfo;
     final TermsEnum termsEnum;
 
-    BaseSortedSetDocValues(SortedSetEntry entry, IndexInput data) throws IOException {
+    BaseSortedSetDocValues(SortedSetEntry entry, IndexInput data, FieldInfo fieldInfo) throws IOException {
       this.entry = entry;
       this.data = data;
+      this.fieldInfo = fieldInfo;
       this.termsEnum = termsEnum();
     }
 
@@ -1039,13 +1046,14 @@ final class Lucene90DocValuesProducer extends DocValuesProducer {
 
     @Override
     public TermsEnum termsEnum() throws IOException {
-      return new TermsDict(entry.termsDictEntry, data);
+      return new TermsDict(entry.termsDictEntry, data, fieldInfo);
     }
   }
 
   private class TermsDict extends BaseTermsEnum {
     static final int LZ4_DECOMPRESSOR_PADDING = 7;
 
+    final FieldInfo field;
     final TermsDictEntry entry;
     final LongValues blockAddresses;
     final IndexInput bytes;
@@ -1060,7 +1068,8 @@ final class Lucene90DocValuesProducer extends DocValuesProducer {
     long currentCompressedBlockStart = -1;
     long currentCompressedBlockEnd = -1;
 
-    TermsDict(TermsDictEntry entry, IndexInput data) throws IOException {
+    TermsDict(TermsDictEntry entry, IndexInput data, FieldInfo fieldInfo) throws IOException {
+      this.field = fieldInfo;
       this.entry = entry;
       RandomAccessInput addressesSlice =
           data.randomAccessSlice(entry.termsAddressesOffset, entry.termsAddressesLength);
@@ -1240,7 +1249,7 @@ final class Lucene90DocValuesProducer extends DocValuesProducer {
           blockBuffer.length = bytes.readVInt();
           // Decompress the remaining of current block, using the first term as a dictionary
           System.arraycopy(term.bytes, 0, blockBuffer.bytes, 0, blockBuffer.offset);
-          LZ4.decompress(bytes, blockBuffer.length, blockBuffer.bytes, blockBuffer.offset);
+          decompressor.decompress(field, offset, bytes, blockBuffer.length, blockBuffer.bytes, blockBuffer.offset);
           currentCompressedBlockStart = offset;
           currentCompressedBlockEnd = bytes.getFilePointer();
         } else {
@@ -1429,7 +1438,7 @@ final class Lucene90DocValuesProducer extends DocValuesProducer {
   public SortedSetDocValues getSortedSet(FieldInfo field) throws IOException {
     SortedSetEntry entry = sortedSets.get(field.name);
     if (entry.singleValueEntry != null) {
-      return DocValues.singleton(getSorted(entry.singleValueEntry));
+      return DocValues.singleton(getSorted(entry.singleValueEntry, field));
     }
 
     // Specialize the common case for ordinals: single block of packed integers.
@@ -1449,7 +1458,7 @@ final class Lucene90DocValuesProducer extends DocValuesProducer {
       final LongValues values = DirectReader.getInstance(slice, ordsEntry.bitsPerValue);
 
       if (ordsEntry.docsWithFieldOffset == -1) { // dense
-        return new BaseSortedSetDocValues(entry, data) {
+        return new BaseSortedSetDocValues(entry, data, field) {
 
           private final int maxDoc = Lucene90DocValuesProducer.this.maxDoc;
           private int doc = -1;
@@ -1515,7 +1524,7 @@ final class Lucene90DocValuesProducer extends DocValuesProducer {
                 ordsEntry.denseRankPower,
                 ordsEntry.numValues);
 
-        return new BaseSortedSetDocValues(entry, data) {
+        return new BaseSortedSetDocValues(entry, data, field) {
 
           boolean set;
           long start, end;
@@ -1578,7 +1587,7 @@ final class Lucene90DocValuesProducer extends DocValuesProducer {
     }
 
     final SortedNumericDocValues ords = getSortedNumeric(ordsEntry);
-    return new BaseSortedSetDocValues(entry, data) {
+    return new BaseSortedSetDocValues(entry, data, field) {
 
       int i = 0;
       int count = 0;

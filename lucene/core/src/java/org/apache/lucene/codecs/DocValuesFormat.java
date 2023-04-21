@@ -39,13 +39,15 @@ import org.apache.lucene.util.NamedSPILoader;
  */
 public abstract class DocValuesFormat implements NamedSPILoader.NamedSPI {
 
+  private static ClassLoader initialClassloader;
+
   /**
    * This static holder class prevents classloading deadlock by delaying init of doc values formats
    * until needed.
    */
   private static final class Holder {
     private static final NamedSPILoader<DocValuesFormat> LOADER =
-        new NamedSPILoader<>(DocValuesFormat.class);
+        new NamedSPILoader<>(DocValuesFormat.class, initialClassloader);
 
     private Holder() {}
 
@@ -123,6 +125,7 @@ public abstract class DocValuesFormat implements NamedSPILoader.NamedSPI {
    * formats on the given classpath/classloader!</em>
    */
   public static void reloadDocValuesFormats(ClassLoader classloader) {
+    initialClassloader = classloader;
     Holder.getLoader().reload(classloader);
   }
 }

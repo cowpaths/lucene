@@ -20,6 +20,9 @@ import org.apache.lucene.codecs.PostingsFormat; // javadocs
 import org.apache.lucene.codecs.perfield.PerFieldPostingsFormat; // javadocs
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.IOContext;
+import org.apache.lucene.store.IndexInput;
+import org.apache.lucene.util.compress.LZ4;
+import java.io.IOException;
 
 /**
  * Holder class for common parameters used during read.
@@ -38,6 +41,10 @@ public class SegmentReadState {
 
   /** {@link IOContext} to pass to {@link Directory#openInput(String,IOContext)}. */
   public final IOContext context;
+
+  public final Decompressor decompressor;
+
+  public static final Decompressor DEFAULT_DECOMPRESSOR = new Decompressor() {};
 
   /**
    * Unique suffix for any postings files read for this segment. {@link PerFieldPostingsFormat} sets
@@ -65,6 +72,7 @@ public class SegmentReadState {
     this.fieldInfos = fieldInfos;
     this.context = context;
     this.segmentSuffix = segmentSuffix;
+    this.decompressor = DEFAULT_DECOMPRESSOR;
   }
 
   /** Create a {@code SegmentReadState}. */
@@ -73,6 +81,22 @@ public class SegmentReadState {
     this.segmentInfo = other.segmentInfo;
     this.fieldInfos = other.fieldInfos;
     this.context = other.context;
+    this.decompressor = other.decompressor;
     this.segmentSuffix = newSegmentSuffix;
+  }
+
+  public SegmentReadState(SegmentReadState other, Decompressor decompressor) {
+    this.directory = other.directory;
+    this.segmentInfo = other.segmentInfo;
+    this.fieldInfos = other.fieldInfos;
+    this.context = other.context;
+    this.segmentSuffix = other.segmentSuffix;
+    this.decompressor = decompressor;
+  }
+
+  public interface Decompressor {
+    default int decompress(FieldInfo field, long offset, IndexInput compressed, int decompressedLen, byte[] dest, int dOff) throws IOException {
+      return LZ4.decompress(compressed, decompressedLen, dest, dOff);
+    }
   }
 }

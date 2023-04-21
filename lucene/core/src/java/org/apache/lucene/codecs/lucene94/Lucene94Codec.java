@@ -118,7 +118,7 @@ public class Lucene94Codec extends Codec {
     this.storedFieldsFormat =
         new Lucene90StoredFieldsFormat(Objects.requireNonNull(mode).storedMode);
     this.defaultPostingsFormat = new Lucene90PostingsFormat();
-    this.defaultDVFormat = new Lucene90DocValuesFormat();
+    this.defaultDVFormat = DocValuesFormat.forName("Lucene90");
     this.defaultKnnVectorsFormat = new Lucene94HnswVectorsFormat();
   }
 
