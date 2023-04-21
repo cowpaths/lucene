@@ -21,6 +21,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.Iterator;
 import java.util.List;
 import org.apache.lucene.util.ArrayUtil;
 import org.apache.lucene.util.BitSet;
@@ -108,17 +109,36 @@ final class ConjunctionDISI extends DocIdSetIterator {
           "Sub-iterators of ConjunctionDISI are not on the same document!");
     }
 
-    long minCost = allIterators.stream().mapToLong(DocIdSetIterator::cost).min().getAsLong();
+    Iterator<DocIdSetIterator> costSorted = allIterators.stream().sorted(Comparator.comparingLong(DocIdSetIterator::cost)).iterator();
     List<BitSetIterator> bitSetIterators = new ArrayList<>();
     List<DocIdSetIterator> iterators = new ArrayList<>();
-    for (DocIdSetIterator iterator : allIterators) {
-      if (iterator.cost() > minCost && iterator instanceof BitSetIterator) {
-        // we put all bitset iterators into bitSetIterators
-        // except if they have the minimum cost, since we need
-        // them to lead the iteration in that case
-        bitSetIterators.add((BitSetIterator) iterator);
+    iterators.add(costSorted.next());
+    if (costSorted.hasNext()) {
+      DocIdSetIterator candidate = costSorted.next();
+      while (costSorted.hasNext()) {
+        DocIdSetIterator next = costSorted.next();
+        if (candidate instanceof BitSetIterator) {
+          if (iterators.size() < 2) {
+            if (next instanceof BitSetIterator) {
+              bitSetIterators.add((BitSetIterator) next);
+              next = candidate;
+            } else if (candidate.cost() < next.cost() >>> 1) {
+              iterators.add(candidate);
+            } else {
+              bitSetIterators.add((BitSetIterator) candidate);
+            }
+          } else {
+            bitSetIterators.add((BitSetIterator) candidate);
+          }
+        } else {
+          iterators.add(candidate);
+        }
+        candidate = next;
+      }
+      if (candidate instanceof BitSetIterator) {
+        bitSetIterators.add((BitSetIterator) candidate);
       } else {
-        iterators.add(iterator);
+        iterators.add(candidate);
       }
     }
 
