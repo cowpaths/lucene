@@ -78,6 +78,17 @@ public class CompiledAutomaton implements Accountable {
   public final Automaton automaton;
 
   /**
+   * In some cases it can be more efficient to work with a non-determinized automaton. Here
+   * we provide access to the original input automaton, before it is modified in the ctor.
+   */
+  public final Automaton originalAutomaton;
+
+  /**
+   * <code>true</code> if the {@link #originalAutomaton} is binary.
+   */
+  public final boolean originalIsBinary;
+
+  /**
    * Shared common suffix accepted by the automaton. Only valid for {@link AUTOMATON_TYPE#NORMAL},
    * and only when the automaton accepts an infinite language. This will be null if the common
    * prefix is length 0.
@@ -149,6 +160,8 @@ public class CompiledAutomaton implements Accountable {
       boolean simplify,
       int determinizeWorkLimit,
       boolean isBinary) {
+    this.originalAutomaton = automaton;
+    this.originalIsBinary = isBinary;
     if (automaton.getNumStates() == 0) {
       automaton = new Automaton();
       automaton.createState();
