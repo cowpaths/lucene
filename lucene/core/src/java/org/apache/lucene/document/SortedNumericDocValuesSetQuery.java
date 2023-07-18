@@ -20,6 +20,7 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.Objects;
 import org.apache.lucene.index.DocValues;
+import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.NumericDocValues;
 import org.apache.lucene.index.SortedNumericDocValues;
@@ -84,11 +85,11 @@ final class SortedNumericDocValuesSetQuery extends Query implements Accountable 
   }
 
   @Override
-  public Query rewrite(IndexSearcher indexSearcher) throws IOException {
+  public Query rewrite(IndexReader indexReader) throws IOException {
     if (numbers.size() == 0) {
       return new MatchNoDocsQuery();
     }
-    return super.rewrite(indexSearcher);
+    return super.rewrite(indexReader);
   }
 
   @Override

@@ -18,7 +18,6 @@ package org.apache.lucene.search;
 
 import java.io.IOException;
 import java.util.Arrays;
-import java.util.Objects;
 import org.apache.lucene.codecs.KnnVectorsReader;
 import org.apache.lucene.document.KnnFloatVectorField;
 import org.apache.lucene.index.FieldInfo;
@@ -26,7 +25,6 @@ import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.VectorEncoding;
 import org.apache.lucene.util.ArrayUtil;
 import org.apache.lucene.util.Bits;
-import org.apache.lucene.util.VectorUtil;
 
 /**
  * Uses {@link KnnVectorsReader#search(String, float[], int, Bits, int)} to perform nearest
@@ -72,7 +70,7 @@ public class KnnFloatVectorQuery extends AbstractKnnVectorQuery {
    */
   public KnnFloatVectorQuery(String field, float[] target, int k, Query filter) {
     super(field, k, filter);
-    this.target = VectorUtil.checkFinite(Objects.requireNonNull(target, "target"));
+    this.target = target;
   }
 
   @Override

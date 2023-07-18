@@ -806,7 +806,7 @@ public class TestMultiRangeQueries extends LuceneTestCase {
         builder2.add(LongPoint.newRangeQuery("point", lower, upper), BooleanClause.Occur.SHOULD);
       }
 
-      MultiRangeQuery multiRangeQuery = (MultiRangeQuery) builder1.build().rewrite(searcher);
+      MultiRangeQuery multiRangeQuery = (MultiRangeQuery) builder1.build().rewrite(reader);
       BooleanQuery booleanQuery = builder2.build();
       int count = searcher.search(multiRangeQuery, DummyTotalHitCountCollector.createManager());
       int booleanCount = searcher.search(booleanQuery, DummyTotalHitCountCollector.createManager());
@@ -839,7 +839,7 @@ public class TestMultiRangeQueries extends LuceneTestCase {
         builder2.add(LongPoint.newRangeQuery("point", lower, upper), BooleanClause.Occur.SHOULD);
       }
 
-      MultiRangeQuery multiRangeQuery = (MultiRangeQuery) builder1.build().rewrite(searcher);
+      MultiRangeQuery multiRangeQuery = (MultiRangeQuery) builder1.build().rewrite(reader);
       BooleanQuery booleanQuery = builder2.build();
       int count =
           multiRangeQuery

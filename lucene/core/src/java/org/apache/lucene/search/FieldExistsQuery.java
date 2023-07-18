@@ -108,8 +108,7 @@ public class FieldExistsQuery extends Query {
   }
 
   @Override
-  public Query rewrite(IndexSearcher indexSearcher) throws IOException {
-    IndexReader reader = indexSearcher.getIndexReader();
+  public Query rewrite(IndexReader reader) throws IOException {
     boolean allReadersRewritable = true;
 
     for (LeafReaderContext context : reader.leaves()) {
@@ -173,7 +172,7 @@ public class FieldExistsQuery extends Query {
     if (allReadersRewritable) {
       return new MatchAllDocsQuery();
     }
-    return super.rewrite(indexSearcher);
+    return super.rewrite(reader);
   }
 
   @Override

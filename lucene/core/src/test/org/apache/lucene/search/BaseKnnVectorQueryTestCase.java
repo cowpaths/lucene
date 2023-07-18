@@ -210,10 +210,7 @@ abstract class BaseKnnVectorQueryTestCase extends LuceneTestCase {
       IndexSearcher searcher = newSearcher(reader);
       AbstractKnnVectorQuery kvq = getKnnVectorQuery("field", new float[] {0}, 10);
       IllegalArgumentException e =
-          expectThrows(
-              RuntimeException.class,
-              IllegalArgumentException.class,
-              () -> searcher.search(kvq, 10));
+          expectThrows(IllegalArgumentException.class, () -> searcher.search(kvq, 10));
       assertEquals("vector query dimension: 1 differs from field dimension: 2", e.getMessage());
     }
   }
@@ -239,7 +236,7 @@ abstract class BaseKnnVectorQueryTestCase extends LuceneTestCase {
             getIndexStore("field", new float[] {0, 1}, new float[] {1, 2}, new float[] {0, 0});
         IndexReader reader = DirectoryReader.open(indexStore)) {
       AbstractKnnVectorQuery query = getKnnVectorQuery("field", new float[] {2, 3}, 3);
-      Query dasq = query.rewrite(newSearcher(reader));
+      Query dasq = query.rewrite(reader);
       IndexSearcher leafSearcher = newSearcher(reader.leaves().get(0).reader());
       expectThrows(
           IllegalStateException.class,
@@ -259,7 +256,7 @@ abstract class BaseKnnVectorQueryTestCase extends LuceneTestCase {
       try (IndexReader reader = DirectoryReader.open(d)) {
         IndexSearcher searcher = new IndexSearcher(reader);
         AbstractKnnVectorQuery query = getKnnVectorQuery("field", new float[] {2, 3}, 3);
-        Query dasq = query.rewrite(searcher);
+        Query dasq = query.rewrite(reader);
         Scorer scorer =
             dasq.createWeight(searcher, ScoreMode.COMPLETE, 1).scorer(reader.leaves().get(0));
         // before advancing the iterator
@@ -286,7 +283,7 @@ abstract class BaseKnnVectorQueryTestCase extends LuceneTestCase {
         IndexReader reader = DirectoryReader.open(d)) {
       IndexSearcher searcher = new IndexSearcher(reader);
       AbstractKnnVectorQuery query = getKnnVectorQuery("field", new float[] {2, 3}, 3);
-      Query rewritten = query.rewrite(searcher);
+      Query rewritten = query.rewrite(reader);
       Weight weight = searcher.createWeight(rewritten, ScoreMode.COMPLETE, 1);
       Scorer scorer = weight.scorer(reader.leaves().get(0));
 
@@ -325,7 +322,7 @@ abstract class BaseKnnVectorQueryTestCase extends LuceneTestCase {
         assertEquals(1, reader.leaves().size());
         IndexSearcher searcher = new IndexSearcher(reader);
         AbstractKnnVectorQuery query = getKnnVectorQuery("field", new float[] {2, 3}, 3);
-        Query rewritten = query.rewrite(searcher);
+        Query rewritten = query.rewrite(reader);
         Weight weight = searcher.createWeight(rewritten, ScoreMode.COMPLETE, 1);
         Scorer scorer = weight.scorer(reader.leaves().get(0));
 
@@ -532,7 +529,6 @@ abstract class BaseKnnVectorQueryTestCase extends LuceneTestCase {
           assertEquals(9, results.totalHits.value);
           assertEquals(results.totalHits.value, results.scoreDocs.length);
           expectThrows(
-              RuntimeException.class,
               UnsupportedOperationException.class,
               () ->
                   searcher.search(
@@ -547,7 +543,6 @@ abstract class BaseKnnVectorQueryTestCase extends LuceneTestCase {
           assertEquals(5, results.totalHits.value);
           assertEquals(results.totalHits.value, results.scoreDocs.length);
           expectThrows(
-              RuntimeException.class,
               UnsupportedOperationException.class,
               () ->
                   searcher.search(
@@ -575,7 +570,6 @@ abstract class BaseKnnVectorQueryTestCase extends LuceneTestCase {
           // Test a filter that exhausts visitedLimit in upper levels, and switches to exact search
           Query filter4 = IntPoint.newRangeQuery("tag", lower, lower + 2);
           expectThrows(
-              RuntimeException.class,
               UnsupportedOperationException.class,
               () ->
                   searcher.search(
@@ -748,7 +742,6 @@ abstract class BaseKnnVectorQueryTestCase extends LuceneTestCase {
 
         Query filter = new ThrowingBitSetQuery(new FixedBitSet(numDocs));
         expectThrows(
-            RuntimeException.class,
             UnsupportedOperationException.class,
             () ->
                 searcher.search(

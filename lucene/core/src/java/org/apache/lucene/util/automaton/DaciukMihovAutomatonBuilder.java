@@ -16,15 +16,14 @@
  */
 package org.apache.lucene.util.automaton;
 
-import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.IdentityHashMap;
 import org.apache.lucene.util.ArrayUtil;
 import org.apache.lucene.util.BytesRef;
-import org.apache.lucene.util.BytesRefBuilder;
-import org.apache.lucene.util.BytesRefIterator;
+import org.apache.lucene.util.CharsRef;
 import org.apache.lucene.util.UnicodeUtil;
 
 /**
@@ -33,22 +32,14 @@ import org.apache.lucene.util.UnicodeUtil;
  *
  * @see #build(Collection)
  * @see Automata#makeStringUnion(Collection)
- * @see Automata#makeBinaryStringUnion(Collection)
- * @see Automata#makeStringUnion(BytesRefIterator)
- * @see Automata#makeBinaryStringUnion(BytesRefIterator)
- * @deprecated Visibility of this class will be reduced in a future release. Users can access this
- *     functionality directly through {@link Automata#makeStringUnion(Collection)}
  */
-@Deprecated
 public final class DaciukMihovAutomatonBuilder {
 
   /**
    * This builder rejects terms that are more than 1k chars long since it then uses recursion based
    * on the length of the string, which might cause stack overflows.
-   *
-   * @deprecated See {@link Automata#MAX_STRING_UNION_TERM_LENGTH}
    */
-  @Deprecated public static final int MAX_TERM_LENGTH = 1_000;
+  public static final int MAX_TERM_LENGTH = 1_000;
 
   /** The default constructor is private. Use static methods directly. */
   private DaciukMihovAutomatonBuilder() {
@@ -188,18 +179,56 @@ public final class DaciukMihovAutomatonBuilder {
   private HashMap<State, State> stateRegistry = new HashMap<>();
 
   /** Root automaton state. */
-  private final State root = new State();
+  private State root = new State();
 
-  /** Used for input order checking (only through assertions right now) */
-  private BytesRefBuilder previous;
+  /** Previous sequence added to the automaton in {@link #add(CharsRef)}. */
+  private CharsRef previous;
 
-  /** Copy <code>current</code> into an internal buffer. */
-  private boolean setPrevious(BytesRef current) {
-    if (previous == null) {
-      previous = new BytesRefBuilder();
+  /** A comparator used for enforcing sorted UTF8 order, used in assertions only. */
+  @SuppressWarnings("deprecation")
+  private static final Comparator<CharsRef> comparator = CharsRef.getUTF16SortedAsUTF8Comparator();
+
+  /**
+   * Add another character sequence to this automaton. The sequence must be lexicographically larger
+   * or equal compared to any previous sequences added to this automaton (the input must be sorted).
+   */
+  public void add(CharsRef current) {
+    if (current.length > MAX_TERM_LENGTH) {
+      throw new IllegalArgumentException(
+          "This builder doesn't allow terms that are larger than 1,000 characters, got " + current);
     }
-    previous.copyBytes(current);
-    return true;
+    assert stateRegistry != null : "Automaton already built.";
+    assert previous == null || comparator.compare(previous, current) <= 0
+        : "Input must be in sorted UTF-8 order: " + previous + " >= " + current;
+    assert setPrevious(current);
+
+    // Descend in the automaton (find matching prefix).
+    int pos = 0, max = current.length();
+    State next, state = root;
+    while (pos < max && (next = state.lastChild(Character.codePointAt(current, pos))) != null) {
+      state = next;
+      // todo, optimize me
+      pos += Character.charCount(Character.codePointAt(current, pos));
+    }
+
+    if (state.hasChildren()) replaceOrRegister(state);
+
+    addSuffix(state, current, pos);
+  }
+
+  /**
+   * Finalize the automaton and return the root state. No more strings can be added to the builder
+   * after this call.
+   *
+   * @return Root automaton state.
+   */
+  public State complete() {
+    if (this.stateRegistry == null) throw new IllegalStateException();
+
+    if (root.hasChildren()) replaceOrRegister(root);
+
+    stateRegistry = null;
+    return root;
   }
 
   /** Internal recursive traversal for conversion. */
@@ -225,115 +254,34 @@ public final class DaciukMihovAutomatonBuilder {
   }
 
   /**
-   * Called after adding all terms. Performs final minimization and converts to a standard {@link
-   * Automaton} instance.
+   * Build a minimal, deterministic automaton from a sorted list of {@link BytesRef} representing
+   * strings in UTF-8. These strings must be binary-sorted.
    */
-  private Automaton completeAndConvert() {
-    // Final minimization:
-    if (this.stateRegistry == null) throw new IllegalStateException();
-    if (root.hasChildren()) replaceOrRegister(root);
-    stateRegistry = null;
+  public static Automaton build(Collection<BytesRef> input) {
+    final DaciukMihovAutomatonBuilder builder = new DaciukMihovAutomatonBuilder();
 
-    // Convert:
+    char[] chars = new char[0];
+    CharsRef ref = new CharsRef();
+    for (BytesRef b : input) {
+      chars = ArrayUtil.grow(chars, b.length);
+      final int len = UnicodeUtil.UTF8toUTF16(b, chars);
+      ref.chars = chars;
+      ref.length = len;
+      builder.add(ref);
+    }
+
     Automaton.Builder a = new Automaton.Builder();
-    convert(a, root, new IdentityHashMap<>());
+    convert(a, builder.complete(), new IdentityHashMap<State, Integer>());
+
     return a.finish();
   }
 
-  /**
-   * Build a minimal, deterministic automaton from a sorted list of {@link BytesRef} representing
-   * strings in UTF-8. These strings must be binary-sorted.
-   *
-   * @deprecated Please see {@link Automata#makeStringUnion(Collection)} instead
-   */
-  @Deprecated
-  public static Automaton build(Collection<BytesRef> input) {
-    return build(input, false);
-  }
-
-  /**
-   * Build a minimal, deterministic automaton from a sorted list of {@link BytesRef} representing
-   * strings in UTF-8. These strings must be binary-sorted.
-   */
-  static Automaton build(Collection<BytesRef> input, boolean asBinary) {
-    final DaciukMihovAutomatonBuilder builder = new DaciukMihovAutomatonBuilder();
-
-    for (BytesRef b : input) {
-      builder.add(b, asBinary);
-    }
-
-    return builder.completeAndConvert();
-  }
-
-  /**
-   * Build a minimal, deterministic automaton from a sorted list of {@link BytesRef} representing
-   * strings in UTF-8. These strings must be binary-sorted. Creates an {@link Automaton} with either
-   * UTF-8 codepoints as transition labels or binary (compiled) transition labels based on {@code
-   * asBinary}.
-   */
-  static Automaton build(BytesRefIterator input, boolean asBinary) throws IOException {
-    final DaciukMihovAutomatonBuilder builder = new DaciukMihovAutomatonBuilder();
-
-    for (BytesRef b = input.next(); b != null; b = input.next()) {
-      builder.add(b, asBinary);
-    }
-
-    return builder.completeAndConvert();
-  }
-
-  private void add(BytesRef current, boolean asBinary) {
-    if (current.length > Automata.MAX_STRING_UNION_TERM_LENGTH) {
-      throw new IllegalArgumentException(
-          "This builder doesn't allow terms that are larger than "
-              + Automata.MAX_STRING_UNION_TERM_LENGTH
-              + " characters, got "
-              + current);
-    }
-    assert stateRegistry != null : "Automaton already built.";
-    assert previous == null || previous.get().compareTo(current) <= 0
-        : "Input must be in sorted UTF-8 order: " + previous.get() + " >= " + current;
-    assert setPrevious(current);
-
-    // Reusable codepoint information if we're building a non-binary based automaton
-    UnicodeUtil.UTF8CodePoint codePoint = null;
-
-    // Descend in the automaton (find matching prefix).
-    byte[] bytes = current.bytes;
-    int pos = current.offset, max = current.offset + current.length;
-    State next, state = root;
-    if (asBinary) {
-      while (pos < max && (next = state.lastChild(bytes[pos] & 0xff)) != null) {
-        state = next;
-        pos++;
-      }
-    } else {
-      while (pos < max) {
-        codePoint = UnicodeUtil.codePointAt(bytes, pos, codePoint);
-        next = state.lastChild(codePoint.codePoint);
-        if (next == null) {
-          break;
-        }
-        state = next;
-        pos += codePoint.numBytes;
-      }
-    }
-
-    if (state.hasChildren()) replaceOrRegister(state);
-
-    // Add suffix
-    if (asBinary) {
-      while (pos < max) {
-        state = state.newState(bytes[pos] & 0xff);
-        pos++;
-      }
-    } else {
-      while (pos < max) {
-        codePoint = UnicodeUtil.codePointAt(bytes, pos, codePoint);
-        state = state.newState(codePoint.codePoint);
-        pos += codePoint.numBytes;
-      }
-    }
-    state.is_final = true;
+  /** Copy <code>current</code> into an internal buffer. */
+  private boolean setPrevious(CharsRef current) {
+    // don't need to copy, once we fix https://issues.apache.org/jira/browse/LUCENE-3277
+    // still, called only from assert
+    previous = CharsRef.deepCopyOf(current);
+    return true;
   }
 
   /**
@@ -351,5 +299,19 @@ public final class DaciukMihovAutomatonBuilder {
     } else {
       stateRegistry.put(child, child);
     }
+  }
+
+  /**
+   * Add a suffix of <code>current</code> starting at <code>fromIndex</code> (inclusive) to state
+   * <code>state</code>.
+   */
+  private void addSuffix(State state, CharSequence current, int fromIndex) {
+    final int len = current.length();
+    while (fromIndex < len) {
+      int cp = Character.codePointAt(current, fromIndex);
+      state = state.newState(cp);
+      fromIndex += Character.charCount(cp);
+    }
+    state.is_final = true;
   }
 }

@@ -17,17 +17,14 @@
 package org.apache.lucene.index;
 
 /**
- * Query timeout abstraction that controls whether a query should continue or be stopped. Can be set
- * to the searcher through {@link org.apache.lucene.search.IndexSearcher#setTimeout(QueryTimeout)},
- * in which case bulk scoring will be time-bound. Can also be used in combination with {@link
- * ExitableDirectoryReader}.
+ * Base for query timeout implementations, which will provide a {@code shouldExit()} method, used
+ * with {@link ExitableDirectoryReader}.
  */
 public interface QueryTimeout {
 
   /**
-   * Called to determine whether to stop processing a query
-   *
-   * @return true if the query should stop, false otherwise
+   * Called from {@link ExitableDirectoryReader.ExitableTermsEnum#next()} to determine whether to
+   * stop processing a query.
    */
-  boolean shouldExit();
+  public abstract boolean shouldExit();
 }

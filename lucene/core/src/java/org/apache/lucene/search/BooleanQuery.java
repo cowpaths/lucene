@@ -30,6 +30,7 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 import java.util.function.Predicate;
+import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.search.BooleanClause.Occur;
 
 /**
@@ -246,7 +247,7 @@ public class BooleanQuery extends Query implements Iterable<BooleanClause> {
   }
 
   @Override
-  public Query rewrite(IndexSearcher indexSearcher) throws IOException {
+  public Query rewrite(IndexReader reader) throws IOException {
     if (clauses.size() == 0) {
       return new MatchNoDocsQuery("empty BooleanQuery");
     }
@@ -285,12 +286,12 @@ public class BooleanQuery extends Query implements Iterable<BooleanClause> {
         Query rewritten;
         if (occur == Occur.FILTER || occur == Occur.MUST_NOT) {
           // Clauses that are not involved in scoring can get some extra simplifications
-          rewritten = new ConstantScoreQuery(query).rewrite(indexSearcher);
+          rewritten = new ConstantScoreQuery(query).rewrite(reader);
           if (rewritten instanceof ConstantScoreQuery) {
             rewritten = ((ConstantScoreQuery) rewritten).getQuery();
           }
         } else {
-          rewritten = query.rewrite(indexSearcher);
+          rewritten = query.rewrite(reader);
         }
         if (rewritten != query || query.getClass() == MatchNoDocsQuery.class) {
           // rewrite clause
@@ -565,7 +566,7 @@ public class BooleanQuery extends Query implements Iterable<BooleanClause> {
       }
     }
 
-    return super.rewrite(indexSearcher);
+    return super.rewrite(reader);
   }
 
   @Override

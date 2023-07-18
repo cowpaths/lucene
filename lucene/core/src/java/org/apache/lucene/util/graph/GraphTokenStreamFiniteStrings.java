@@ -45,8 +45,6 @@ import org.apache.lucene.util.automaton.Transition;
  * different paths of the {@link Automaton}.
  */
 public final class GraphTokenStreamFiniteStrings {
-  /** Maximum level of recursion allowed in recursive operations. */
-  private static final int MAX_RECURSION_LEVEL = 1000;
 
   private AttributeSource[] tokens = new AttributeSource[4];
   private final Automaton det;
@@ -273,12 +271,7 @@ public final class GraphTokenStreamFiniteStrings {
       a.getNextTransition(t);
       if (visited.get(t.dest) == false) {
         parent[t.dest] = state;
-        if (d < MAX_RECURSION_LEVEL) {
-          articulationPointsRecurse(a, t.dest, d + 1, depth, low, parent, visited, points);
-        } else {
-          throw new IllegalArgumentException(
-              "Exceeded maximum recursion level during graph analysis");
-        }
+        articulationPointsRecurse(a, t.dest, d + 1, depth, low, parent, visited, points);
         childCount++;
         if (low[t.dest] >= depth[state]) {
           isArticulation = true;

@@ -110,12 +110,12 @@ public final class IndexedDISI extends DocIdSetIterator {
   private static void flush(
       int block, FixedBitSet buffer, int cardinality, byte denseRankPower, IndexOutput out)
       throws IOException {
-    assert block >= 0 && block < BLOCK_SIZE;
+    assert block >= 0 && block < 65536;
     out.writeShort((short) block);
-    assert cardinality > 0 && cardinality <= BLOCK_SIZE;
+    assert cardinality > 0 && cardinality <= 65536;
     out.writeShort((short) (cardinality - 1));
     if (cardinality > MAX_ARRAY_LENGTH) {
-      if (cardinality != BLOCK_SIZE) { // all docs are set
+      if (cardinality != 65536) { // all docs are set
         if (denseRankPower != -1) {
           final byte[] rank = createRank(buffer, denseRankPower);
           out.writeBytes(rank, rank.length);
@@ -220,7 +220,7 @@ public final class IndexedDISI extends DocIdSetIterator {
         // Flush block
         flush(prevBlock, buffer, blockCardinality, denseRankPower, out);
         // Reset for next block
-        buffer.clear();
+        buffer.clear(0, buffer.length());
         totalCardinality += blockCardinality;
         blockCardinality = 0;
       }
@@ -234,7 +234,7 @@ public final class IndexedDISI extends DocIdSetIterator {
               jumps, out.getFilePointer() - origo, totalCardinality, jumpBlockIndex, prevBlock + 1);
       totalCardinality += blockCardinality;
       flush(prevBlock, buffer, blockCardinality, denseRankPower, out);
-      buffer.clear();
+      buffer.clear(0, buffer.length());
       prevBlock++;
     }
     final int lastBlock =
@@ -418,7 +418,6 @@ public final class IndexedDISI extends DocIdSetIterator {
 
   // SPARSE variables
   boolean exists;
-  int nextExistDocInBlock = -1;
 
   // DENSE variables
   long word;
@@ -496,8 +495,7 @@ public final class IndexedDISI extends DocIdSetIterator {
     if (numValues <= MAX_ARRAY_LENGTH) {
       method = Method.SPARSE;
       blockEnd = slice.getFilePointer() + (numValues << 1);
-      nextExistDocInBlock = -1;
-    } else if (numValues == BLOCK_SIZE) {
+    } else if (numValues == 65536) {
       method = Method.ALL;
       blockEnd = slice.getFilePointer();
       gap = block - index - 1;
@@ -552,7 +550,6 @@ public final class IndexedDISI extends DocIdSetIterator {
           if (doc >= targetInBlock) {
             disi.doc = disi.block | doc;
             disi.exists = true;
-            disi.nextExistDocInBlock = doc;
             return true;
           }
         }
@@ -563,10 +560,6 @@ public final class IndexedDISI extends DocIdSetIterator {
       boolean advanceExactWithinBlock(IndexedDISI disi, int target) throws IOException {
         final int targetInBlock = target & 0xFFFF;
         // TODO: binary search
-        if (disi.nextExistDocInBlock > targetInBlock) {
-          assert !disi.exists;
-          return false;
-        }
         if (target == disi.doc) {
           return disi.exists;
         }
@@ -574,7 +567,6 @@ public final class IndexedDISI extends DocIdSetIterator {
           int doc = Short.toUnsignedInt(disi.slice.readShort());
           disi.index++;
           if (doc >= targetInBlock) {
-            disi.nextExistDocInBlock = doc;
             if (doc != targetInBlock) {
               disi.index--;
               disi.slice.seek(disi.slice.getFilePointer() - Short.BYTES);

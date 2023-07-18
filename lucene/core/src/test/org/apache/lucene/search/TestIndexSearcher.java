@@ -453,15 +453,20 @@ public class TestIndexSearcher extends LuceneTestCase {
     }
   }
 
-  private static class RandomBlockingSliceExecutor extends SliceExecutor {
+  private class RandomBlockingSliceExecutor extends SliceExecutor {
 
-    RandomBlockingSliceExecutor(Executor executor) {
+    public RandomBlockingSliceExecutor(Executor executor) {
       super(executor);
     }
 
     @Override
-    boolean shouldExecuteOnCallerThread(int index, int numTasks) {
-      return random().nextBoolean();
+    public void invokeAll(Collection<? extends Runnable> tasks) {
+
+      for (Runnable task : tasks) {
+        boolean shouldExecuteOnCallerThread = random().nextBoolean();
+
+        processTask(task, shouldExecuteOnCallerThread);
+      }
     }
   }
 }

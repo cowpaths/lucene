@@ -155,7 +155,7 @@ public class Dictionary {
   boolean checkCompoundCase, checkCompoundDup, checkCompoundRep;
   boolean checkCompoundTriple, simplifiedTriple;
   int compoundMin = 3, compoundMax = Integer.MAX_VALUE;
-  CompoundRule[] compoundRules; // nullable
+  List<CompoundRule> compoundRules; // nullable
   List<CheckCompoundPattern> checkCompoundPatterns = new ArrayList<>();
 
   // ignored characters (dictionary, affix, inputs)
@@ -601,11 +601,11 @@ public class Dictionary {
     return parts;
   }
 
-  private CompoundRule[] parseCompoundRules(LineNumberReader reader, int num)
+  private List<CompoundRule> parseCompoundRules(LineNumberReader reader, int num)
       throws IOException, ParseException {
-    CompoundRule[] compoundRules = new CompoundRule[num];
+    List<CompoundRule> compoundRules = new ArrayList<>();
     for (int i = 0; i < num; i++) {
-      compoundRules[i] = new CompoundRule(singleArgument(reader, reader.readLine()), this);
+      compoundRules.add(new CompoundRule(singleArgument(reader, reader.readLine()), this));
     }
     return compoundRules;
   }
@@ -992,7 +992,7 @@ public class Dictionary {
           // if we haven't seen any custom morphological data, try to parse one
           if (!hasCustomMorphData) {
             int morphStart = line.indexOf(MORPH_SEPARATOR);
-            if (morphStart >= 0) {
+            if (morphStart >= 0 && morphStart < line.length()) {
               String data = line.substring(morphStart + 1);
               hasCustomMorphData =
                   splitMorphData(data).stream().anyMatch(s -> !s.startsWith("ph:"));
@@ -1321,22 +1321,14 @@ public class Dictionary {
     if (morphData.isBlank()) {
       return Collections.emptyList();
     }
-
-    List<String> result = null;
-    int start = 0;
-    for (int i = 0; i <= morphData.length(); i++) {
-      if (i == morphData.length() || Character.isWhitespace(morphData.charAt(i))) {
-        if (i - start > 3
-            && Character.isLetter(morphData.charAt(start))
-            && Character.isLetter(morphData.charAt(start + 1))
-            && morphData.charAt(start + 2) == ':') {
-          if (result == null) result = new ArrayList<>();
-          result.add(morphData.substring(start, i));
-        }
-        start = i + 1;
-      }
-    }
-    return result == null ? List.of() : result;
+    return Arrays.stream(morphData.split("\\s+"))
+        .filter(
+            s ->
+                s.length() > 3
+                    && Character.isLetter(s.charAt(0))
+                    && Character.isLetter(s.charAt(1))
+                    && s.charAt(2) == ':')
+        .collect(Collectors.toList());
   }
 
   boolean hasFlag(IntsRef forms, char flag) {

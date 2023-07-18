@@ -19,6 +19,7 @@ package org.apache.lucene.queries.spans;
 import java.io.IOException;
 import java.util.Map;
 import java.util.Objects;
+import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.index.TermStates;
@@ -112,8 +113,8 @@ public abstract class SpanPositionCheckQuery extends SpanQuery implements Clonea
   }
 
   @Override
-  public Query rewrite(IndexSearcher indexSearcher) throws IOException {
-    SpanQuery rewritten = (SpanQuery) match.rewrite(indexSearcher);
+  public Query rewrite(IndexReader reader) throws IOException {
+    SpanQuery rewritten = (SpanQuery) match.rewrite(reader);
     if (rewritten != match) {
       try {
         SpanPositionCheckQuery clone = (SpanPositionCheckQuery) this.clone();
@@ -124,7 +125,7 @@ public abstract class SpanPositionCheckQuery extends SpanQuery implements Clonea
       }
     }
 
-    return super.rewrite(indexSearcher);
+    return super.rewrite(reader);
   }
 
   @Override

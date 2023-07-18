@@ -29,11 +29,9 @@
 
 package org.apache.lucene.util.automaton;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
 import org.apache.lucene.util.BytesRef;
-import org.apache.lucene.util.BytesRefIterator;
 import org.apache.lucene.util.StringHelper;
 
 /**
@@ -42,11 +40,6 @@ import org.apache.lucene.util.StringHelper;
  * @lucene.experimental
  */
 public final class Automata {
-  /**
-   * {@link #makeStringUnion(Collection)} limits terms of this max length to ensure the stack
-   * doesn't overflow while building, since our algorithm currently relies on recursion.
-   */
-  public static final int MAX_STRING_UNION_TERM_LENGTH = 1000;
 
   private Automata() {}
 
@@ -580,49 +573,7 @@ public final class Automata {
     if (utf8Strings.isEmpty()) {
       return makeEmpty();
     } else {
-      return DaciukMihovAutomatonBuilder.build(utf8Strings, false);
+      return DaciukMihovAutomatonBuilder.build(utf8Strings);
     }
-  }
-
-  /**
-   * Returns a new (deterministic and minimal) automaton that accepts the union of the given
-   * collection of {@link BytesRef}s representing UTF-8 encoded strings. The resulting automaton
-   * will be built in a binary representation.
-   *
-   * @param utf8Strings The input strings, UTF-8 encoded. The collection must be in sorted order.
-   * @return An {@link Automaton} accepting all input strings. The resulting automaton is binary
-   *     based (UTF-8 encoded byte transition labels).
-   */
-  public static Automaton makeBinaryStringUnion(Collection<BytesRef> utf8Strings) {
-    if (utf8Strings.isEmpty()) {
-      return makeEmpty();
-    } else {
-      return DaciukMihovAutomatonBuilder.build(utf8Strings, true);
-    }
-  }
-
-  /**
-   * Returns a new (deterministic and minimal) automaton that accepts the union of the given
-   * iterator of {@link BytesRef}s representing UTF-8 encoded strings.
-   *
-   * @param utf8Strings The input strings, UTF-8 encoded. The iterator must be in sorted order.
-   * @return An {@link Automaton} accepting all input strings. The resulting automaton is codepoint
-   *     based (full unicode codepoints on transitions).
-   */
-  public static Automaton makeStringUnion(BytesRefIterator utf8Strings) throws IOException {
-    return DaciukMihovAutomatonBuilder.build(utf8Strings, false);
-  }
-
-  /**
-   * Returns a new (deterministic and minimal) automaton that accepts the union of the given
-   * iterator of {@link BytesRef}s representing UTF-8 encoded strings. The resulting automaton will
-   * be built in a binary representation.
-   *
-   * @param utf8Strings The input strings, UTF-8 encoded. The iterator must be in sorted order.
-   * @return An {@link Automaton} accepting all input strings. The resulting automaton is binary
-   *     based (UTF-8 encoded byte transition labels).
-   */
-  public static Automaton makeBinaryStringUnion(BytesRefIterator utf8Strings) throws IOException {
-    return DaciukMihovAutomatonBuilder.build(utf8Strings, true);
   }
 }

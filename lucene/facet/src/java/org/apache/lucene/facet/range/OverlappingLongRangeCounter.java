@@ -84,7 +84,7 @@ class OverlappingLongRangeCounter extends LongRangeCounter {
     if (multiValuedDocElementaryIntervalHits == null) {
       multiValuedDocElementaryIntervalHits = new FixedBitSet(boundaries.length);
     } else {
-      multiValuedDocElementaryIntervalHits.clear();
+      multiValuedDocElementaryIntervalHits.clear(0, multiValuedDocElementaryIntervalHits.length());
     }
   }
 
@@ -103,7 +103,7 @@ class OverlappingLongRangeCounter extends LongRangeCounter {
     if (multiValuedDocRangeHits == null) {
       multiValuedDocRangeHits = new FixedBitSet(rangeCount());
     } else {
-      multiValuedDocRangeHits.clear();
+      multiValuedDocRangeHits.clear(0, multiValuedDocRangeHits.length());
     }
     elementaryIntervalUpto = 0;
     rollupMultiValued(root);

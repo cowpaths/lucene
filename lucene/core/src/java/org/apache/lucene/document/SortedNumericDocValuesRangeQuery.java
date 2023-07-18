@@ -19,6 +19,7 @@ package org.apache.lucene.document;
 import java.io.IOException;
 import java.util.Objects;
 import org.apache.lucene.index.DocValues;
+import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.NumericDocValues;
 import org.apache.lucene.index.SortedNumericDocValues;
@@ -83,11 +84,11 @@ final class SortedNumericDocValuesRangeQuery extends Query {
   }
 
   @Override
-  public Query rewrite(IndexSearcher indexSearcher) throws IOException {
+  public Query rewrite(IndexReader reader) throws IOException {
     if (lowerValue == Long.MIN_VALUE && upperValue == Long.MAX_VALUE) {
       return new FieldExistsQuery(field);
     }
-    return super.rewrite(indexSearcher);
+    return super.rewrite(reader);
   }
 
   @Override

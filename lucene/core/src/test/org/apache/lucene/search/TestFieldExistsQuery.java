@@ -63,8 +63,7 @@ public class TestFieldExistsQuery extends LuceneTestCase {
     final IndexReader reader = iw.getReader();
     iw.close();
 
-    assertTrue(
-        (new FieldExistsQuery("f")).rewrite(newSearcher(reader)) instanceof MatchAllDocsQuery);
+    assertTrue((new FieldExistsQuery("f")).rewrite(reader) instanceof MatchAllDocsQuery);
     reader.close();
     dir.close();
   }
@@ -83,8 +82,7 @@ public class TestFieldExistsQuery extends LuceneTestCase {
     final IndexReader reader = iw.getReader();
     iw.close();
 
-    assertTrue(
-        new FieldExistsQuery("dim").rewrite(newSearcher(reader)) instanceof MatchAllDocsQuery);
+    assertTrue(new FieldExistsQuery("dim").rewrite(reader) instanceof MatchAllDocsQuery);
     reader.close();
     dir.close();
   }
@@ -108,10 +106,9 @@ public class TestFieldExistsQuery extends LuceneTestCase {
     iw.commit();
     final IndexReader reader = iw.getReader();
     iw.close();
-    final IndexSearcher searcher = newSearcher(reader);
 
-    assertFalse((new FieldExistsQuery("dim")).rewrite(searcher) instanceof MatchAllDocsQuery);
-    assertFalse((new FieldExistsQuery("f")).rewrite(searcher) instanceof MatchAllDocsQuery);
+    assertFalse((new FieldExistsQuery("dim")).rewrite(reader) instanceof MatchAllDocsQuery);
+    assertFalse((new FieldExistsQuery("f")).rewrite(reader) instanceof MatchAllDocsQuery);
     reader.close();
     dir.close();
   }
@@ -130,11 +127,10 @@ public class TestFieldExistsQuery extends LuceneTestCase {
     iw.commit();
     final IndexReader reader = iw.getReader();
     iw.close();
-    final IndexSearcher searcher = newSearcher(reader);
 
-    assertFalse((new FieldExistsQuery("dv1")).rewrite(searcher) instanceof MatchAllDocsQuery);
-    assertFalse((new FieldExistsQuery("dv2")).rewrite(searcher) instanceof MatchAllDocsQuery);
-    assertFalse((new FieldExistsQuery("dv3")).rewrite(searcher) instanceof MatchAllDocsQuery);
+    assertFalse((new FieldExistsQuery("dv1")).rewrite(reader) instanceof MatchAllDocsQuery);
+    assertFalse((new FieldExistsQuery("dv2")).rewrite(reader) instanceof MatchAllDocsQuery);
+    assertFalse((new FieldExistsQuery("dv3")).rewrite(reader) instanceof MatchAllDocsQuery);
     reader.close();
     dir.close();
   }

@@ -950,12 +950,12 @@ public class TestWANDScorer extends LuceneTestCase {
     }
 
     @Override
-    public Query rewrite(IndexSearcher indexSearcher) throws IOException {
-      Query rewritten = query.rewrite(indexSearcher);
+    public Query rewrite(IndexReader reader) throws IOException {
+      Query rewritten = query.rewrite(reader);
       if (rewritten != query) {
         return new MaxScoreWrapperQuery(rewritten, maxRange, maxScore);
       }
-      return super.rewrite(indexSearcher);
+      return super.rewrite(reader);
     }
 
     @Override

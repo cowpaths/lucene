@@ -796,9 +796,9 @@ public class IndexSearcher {
    */
   public Query rewrite(Query original) throws IOException {
     Query query = original;
-    for (Query rewrittenQuery = query.rewrite(this);
+    for (Query rewrittenQuery = query.rewrite(reader);
         rewrittenQuery != query;
-        rewrittenQuery = query.rewrite(this)) {
+        rewrittenQuery = query.rewrite(reader)) {
       query = rewrittenQuery;
     }
     query.visit(getNumClausesCheckVisitor());
@@ -996,10 +996,6 @@ public class IndexSearcher {
   /** Returns this searchers executor or <code>null</code> if no executor was provided */
   public Executor getExecutor() {
     return executor;
-  }
-
-  SliceExecutor getSliceExecutor() {
-    return sliceExecutor;
   }
 
   /**

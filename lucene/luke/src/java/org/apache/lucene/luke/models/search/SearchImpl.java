@@ -152,7 +152,7 @@ public final class SearchImpl extends LukeModel implements Search {
 
     if (rewrite) {
       try {
-        query = query.rewrite(searcher);
+        query = query.rewrite(reader);
       } catch (IOException e) {
         throw new LukeException(
             String.format(Locale.ENGLISH, "Failed to rewrite query: %s", query.toString()), e);

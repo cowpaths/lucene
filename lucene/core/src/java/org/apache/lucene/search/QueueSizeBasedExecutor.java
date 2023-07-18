@@ -17,6 +17,7 @@
 
 package org.apache.lucene.search;
 
+import java.util.Collection;
 import java.util.concurrent.ThreadPoolExecutor;
 
 /**
@@ -29,15 +30,31 @@ class QueueSizeBasedExecutor extends SliceExecutor {
 
   private final ThreadPoolExecutor threadPoolExecutor;
 
-  QueueSizeBasedExecutor(ThreadPoolExecutor threadPoolExecutor) {
+  public QueueSizeBasedExecutor(ThreadPoolExecutor threadPoolExecutor) {
     super(threadPoolExecutor);
     this.threadPoolExecutor = threadPoolExecutor;
   }
 
   @Override
-  boolean shouldExecuteOnCallerThread(int index, int numTasks) {
-    return super.shouldExecuteOnCallerThread(index, numTasks)
-        || threadPoolExecutor.getQueue().size()
-            >= (threadPoolExecutor.getMaximumPoolSize() * LIMITING_FACTOR);
+  public void invokeAll(Collection<? extends Runnable> tasks) {
+    int i = 0;
+
+    for (Runnable task : tasks) {
+      boolean shouldExecuteOnCallerThread = false;
+
+      // Execute last task on caller thread
+      if (i == tasks.size() - 1) {
+        shouldExecuteOnCallerThread = true;
+      }
+
+      if (threadPoolExecutor.getQueue().size()
+          >= (threadPoolExecutor.getMaximumPoolSize() * LIMITING_FACTOR)) {
+        shouldExecuteOnCallerThread = true;
+      }
+
+      processTask(task, shouldExecuteOnCallerThread);
+
+      ++i;
+    }
   }
 }

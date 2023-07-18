@@ -31,10 +31,4 @@ public final class CollectionTerminatedException extends RuntimeException {
   public CollectionTerminatedException() {
     super();
   }
-
-  @Override
-  public Throwable fillInStackTrace() {
-    // never re-thrown so we can save the expensive stacktrace
-    return this;
-  }
 }

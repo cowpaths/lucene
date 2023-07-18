@@ -18,7 +18,6 @@
 package org.apache.lucene.search;
 
 import java.util.Collection;
-import java.util.Objects;
 import java.util.concurrent.Executor;
 import java.util.concurrent.RejectedExecutionException;
 
@@ -29,30 +28,54 @@ import java.util.concurrent.RejectedExecutionException;
 class SliceExecutor {
   private final Executor executor;
 
-  SliceExecutor(Executor executor) {
-    this.executor = Objects.requireNonNull(executor, "Executor is null");
+  public SliceExecutor(Executor executor) {
+    this.executor = executor;
   }
 
-  final void invokeAll(Collection<? extends Runnable> tasks) {
+  public void invokeAll(Collection<? extends Runnable> tasks) {
+
+    if (tasks == null) {
+      throw new IllegalArgumentException("Tasks is null");
+    }
+
+    if (executor == null) {
+      throw new IllegalArgumentException("Executor is null");
+    }
+
     int i = 0;
+
     for (Runnable task : tasks) {
-      if (shouldExecuteOnCallerThread(i, tasks.size())) {
-        task.run();
-      } else {
-        try {
-          executor.execute(task);
-        } catch (
-            @SuppressWarnings("unused")
-            RejectedExecutionException e) {
-          task.run();
-        }
+      boolean shouldExecuteOnCallerThread = false;
+
+      // Execute last task on caller thread
+      if (i == tasks.size() - 1) {
+        shouldExecuteOnCallerThread = true;
       }
+
+      processTask(task, shouldExecuteOnCallerThread);
       ++i;
     }
+    ;
   }
 
-  boolean shouldExecuteOnCallerThread(int index, int numTasks) {
-    // Execute last task on caller thread
-    return index == numTasks - 1;
+  // Helper method to execute a single task
+  protected void processTask(final Runnable task, final boolean shouldExecuteOnCallerThread) {
+    if (task == null) {
+      throw new IllegalArgumentException("Input is null");
+    }
+
+    if (!shouldExecuteOnCallerThread) {
+      try {
+        executor.execute(task);
+
+        return;
+      } catch (
+          @SuppressWarnings("unused")
+          RejectedExecutionException e) {
+        // Execute on caller thread
+      }
+    }
+
+    task.run();
   }
 }

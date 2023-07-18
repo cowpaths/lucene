@@ -19,6 +19,7 @@ package org.apache.lucene.queries.function;
 
 import java.io.IOException;
 import java.util.Objects;
+import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.search.BooleanClause;
 import org.apache.lucene.search.DoubleValues;
@@ -121,8 +122,8 @@ public final class FunctionScoreQuery extends Query {
   }
 
   @Override
-  public Query rewrite(IndexSearcher indexSearcher) throws IOException {
-    Query rewritten = in.rewrite(indexSearcher);
+  public Query rewrite(IndexReader reader) throws IOException {
+    Query rewritten = in.rewrite(reader);
     if (rewritten == in) {
       return this;
     }
