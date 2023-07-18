@@ -29,7 +29,6 @@ import org.apache.lucene.index.Impact;
 import org.apache.lucene.index.Impacts;
 import org.apache.lucene.index.ImpactsEnum;
 import org.apache.lucene.index.ImpactsSource;
-import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.PostingsEnum;
 import org.apache.lucene.index.SlowImpactsEnum;
@@ -114,7 +113,7 @@ public final class SynonymQuery extends Query {
    */
   private SynonymQuery(TermAndBoost[] terms, String field) {
     this.terms = Objects.requireNonNull(terms);
-    this.field = field;
+    this.field = Objects.requireNonNull(field);
   }
 
   public List<Term> getTerms() {
@@ -147,11 +146,13 @@ public final class SynonymQuery extends Query {
 
   @Override
   public boolean equals(Object other) {
-    return sameClassAs(other) && Arrays.equals(terms, ((SynonymQuery) other).terms);
+    return sameClassAs(other)
+        && field.equals(((SynonymQuery) other).field)
+        && Arrays.equals(terms, ((SynonymQuery) other).terms);
   }
 
   @Override
-  public Query rewrite(IndexReader reader) throws IOException {
+  public Query rewrite(IndexSearcher indexSearcher) throws IOException {
     // optimize zero and non-boosted single term cases
     if (terms.length == 0) {
       return new BooleanQuery.Builder().build();
