@@ -17,8 +17,6 @@
 package org.apache.lucene.queryparser.surround.query;
 
 import java.io.IOException;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.MultiTerms;
 import org.apache.lucene.index.Term;
@@ -26,7 +24,6 @@ import org.apache.lucene.index.Terms;
 import org.apache.lucene.index.TermsEnum;
 import org.apache.lucene.search.WildcardQuery;
 import org.apache.lucene.util.BytesRef;
-import org.apache.lucene.util.StringHelper;
 import org.apache.lucene.util.automaton.CompiledAutomaton;
 import org.apache.lucene.util.automaton.Operations;
 
@@ -37,8 +34,15 @@ public class SrndTruncQuery extends SimpleTerm {
     this.truncated = truncated;
     this.unlimited = unlimited;
     this.mask = mask;
-    WildcardQuery wc = new WildcardQuery(new Term("dummy", truncated), Operations.DEFAULT_DETERMINIZE_WORK_LIMIT);
-    compiled = new CompiledAutomaton(wc.getAutomaton(), null, true, Operations.DEFAULT_DETERMINIZE_WORK_LIMIT, wc.isAutomatonBinary());
+    WildcardQuery wc =
+        new WildcardQuery(new Term("dummy", truncated), Operations.DEFAULT_DETERMINIZE_WORK_LIMIT);
+    compiled =
+        new CompiledAutomaton(
+            wc.getAutomaton(),
+            null,
+            true,
+            Operations.DEFAULT_DETERMINIZE_WORK_LIMIT,
+            wc.isAutomatonBinary());
     int i = 0;
     while ((i < truncated.length()) && matchingChar(truncated.charAt(i))) {
       i++;
