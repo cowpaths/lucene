@@ -29,11 +29,9 @@ import org.apache.lucene.util.automaton.Operations;
 
 /** Query that matches wildcards */
 public class SrndTruncQuery extends SimpleTerm {
-  public SrndTruncQuery(String truncated, char unlimited, char mask) {
+  public SrndTruncQuery(String truncated) {
     super(false); /* not quoted */
     this.truncated = truncated;
-    this.unlimited = unlimited;
-    this.mask = mask;
     WildcardQuery wc =
         new WildcardQuery(new Term("dummy", truncated), Operations.DEFAULT_DETERMINIZE_WORK_LIMIT);
     compiled =
@@ -43,18 +41,9 @@ public class SrndTruncQuery extends SimpleTerm {
             true,
             Operations.DEFAULT_DETERMINIZE_WORK_LIMIT,
             wc.isAutomatonBinary());
-    int i = 0;
-    while ((i < truncated.length()) && matchingChar(truncated.charAt(i))) {
-      i++;
-    }
-    prefixRef = new BytesRef(truncated.substring(0, i));
   }
 
   private final String truncated;
-  private final char unlimited;
-  private final char mask;
-
-  private final BytesRef prefixRef;
   private final CompiledAutomaton compiled;
 
   public String getTruncated() {
@@ -66,16 +55,12 @@ public class SrndTruncQuery extends SimpleTerm {
     return getTruncated();
   }
 
-  protected boolean matchingChar(char c) {
-    return (c != unlimited) && (c != mask);
-  }
-
   @Override
   public void visitMatchingTerms(IndexReader reader, String fieldName, MatchingTermVisitor mtv)
       throws IOException {
     Terms terms = MultiTerms.getTerms(reader, fieldName);
     if (terms != null) {
-      TermsEnum termsEnum = terms.intersect(compiled, prefixRef);
+      TermsEnum termsEnum = compiled.getTermsEnum(terms);
 
       BytesRef br;
       while ((br = termsEnum.next()) != null) {
