@@ -19,7 +19,7 @@ package org.apache.lucene.queryparser.surround.query;
 import java.io.IOException;
 import java.util.Iterator;
 import java.util.List;
-import org.apache.lucene.index.IndexReader;
+import org.apache.lucene.index.LeafReader;
 import org.apache.lucene.queries.spans.SpanNearQuery;
 import org.apache.lucene.queries.spans.SpanQuery;
 import org.apache.lucene.search.MatchNoDocsQuery;
@@ -71,7 +71,7 @@ public class DistanceQuery extends ComposedQuery implements DistanceSubQuery {
     sncf.addSpanQuery(snq);
   }
 
-  public Query getSpanNearQuery(IndexReader reader, String fieldName, BasicQueryFactory qf)
+  public Query getSpanNearQuery(LeafReader reader, String fieldName, BasicQueryFactory qf)
       throws IOException {
     SpanQuery[] spanClauses = new SpanQuery[getNrSubQueries()];
     Iterator<?> sqi = getSubQueriesIterator();

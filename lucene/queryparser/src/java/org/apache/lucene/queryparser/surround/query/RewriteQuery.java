@@ -18,13 +18,19 @@ package org.apache.lucene.queryparser.surround.query;
 
 import java.io.IOException;
 import java.util.Objects;
+import org.apache.lucene.index.LeafReader;
+import org.apache.lucene.index.LeafReaderContext;
+import org.apache.lucene.search.Explanation;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.Query;
+import org.apache.lucene.search.ScoreMode;
+import org.apache.lucene.search.Scorer;
+import org.apache.lucene.search.Weight;
 
 abstract class RewriteQuery<SQ extends SrndQuery> extends Query {
   protected final SQ srndQuery;
   protected final String fieldName;
-  protected final BasicQueryFactory qf;
+  private final BasicQueryFactory qf;
 
   RewriteQuery(SQ srndQuery, String fieldName, BasicQueryFactory qf) {
     this.srndQuery = Objects.requireNonNull(srndQuery);
@@ -32,8 +38,34 @@ abstract class RewriteQuery<SQ extends SrndQuery> extends Query {
     this.qf = Objects.requireNonNull(qf);
   }
 
+  public abstract Query leafRewrite(LeafReader reader, BasicQueryFactory qf) throws IOException;
+
   @Override
-  public abstract Query rewrite(IndexSearcher indexSearcher) throws IOException;
+  public Weight createWeight(IndexSearcher searcher, ScoreMode scoreMode, float boost)
+      throws IOException {
+    return new Weight(this) {
+      @Override
+      public Explanation explain(LeafReaderContext context, int doc) throws IOException {
+        BasicQueryFactory qf = new BasicQueryFactory(RewriteQuery.this.qf.getMaxBasicQueries());
+        return leafRewrite(context.reader(), qf)
+            .createWeight(searcher, scoreMode, boost)
+            .explain(context, doc);
+      }
+
+      @Override
+      public Scorer scorer(LeafReaderContext context) throws IOException {
+        BasicQueryFactory qf = new BasicQueryFactory(RewriteQuery.this.qf.getMaxBasicQueries());
+        return leafRewrite(context.reader(), qf)
+            .createWeight(searcher, scoreMode, boost)
+            .scorer(context);
+      }
+
+      @Override
+      public boolean isCacheable(LeafReaderContext ctx) {
+        return true;
+      }
+    };
+  }
 
   @Override
   public String toString(String field) {

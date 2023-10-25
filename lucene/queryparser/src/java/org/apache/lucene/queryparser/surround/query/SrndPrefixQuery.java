@@ -17,8 +17,7 @@
 package org.apache.lucene.queryparser.surround.query;
 
 import java.io.IOException;
-import org.apache.lucene.index.IndexReader;
-import org.apache.lucene.index.MultiTerms;
+import org.apache.lucene.index.LeafReader;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.index.Terms;
 import org.apache.lucene.index.TermsEnum;
@@ -70,10 +69,10 @@ public class SrndPrefixQuery extends SimpleTerm {
   }
 
   @Override
-  public void visitMatchingTerms(IndexReader reader, String fieldName, MatchingTermVisitor mtv)
+  public void visitMatchingTerms(LeafReader reader, String fieldName, MatchingTermVisitor mtv)
       throws IOException {
     /* inspired by PrefixQuery.rewrite(): */
-    Terms terms = MultiTerms.getTerms(reader, fieldName);
+    Terms terms = reader.terms(fieldName);
     if (terms != null) {
       TermsEnum termsEnum = compiled.getTermsEnum(terms);
 
