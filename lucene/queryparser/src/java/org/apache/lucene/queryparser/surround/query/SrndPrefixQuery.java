@@ -17,6 +17,7 @@
 package org.apache.lucene.queryparser.surround.query;
 
 import java.io.IOException;
+import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.index.LeafReader;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.index.Terms;
@@ -28,21 +29,11 @@ import org.apache.lucene.util.automaton.Operations;
 
 /** Query that matches String prefixes */
 public class SrndPrefixQuery extends SimpleTerm {
-  private final BytesRef prefixRef;
-  private final CompiledAutomaton compiled;
+  private CompiledAutomaton compiled;
 
   public SrndPrefixQuery(String prefix, boolean quoted, char truncator) {
     super(quoted);
     this.prefix = prefix;
-    prefixRef = new BytesRef(prefix);
-    PrefixQuery q = new PrefixQuery(new Term("dummy", prefixRef));
-    compiled =
-        new CompiledAutomaton(
-            q.getAutomaton(),
-            null,
-            true,
-            Operations.DEFAULT_DETERMINIZE_WORK_LIMIT,
-            q.isAutomatonBinary());
     this.truncator = truncator;
   }
 
@@ -69,9 +60,22 @@ public class SrndPrefixQuery extends SimpleTerm {
   }
 
   @Override
-  public void visitMatchingTerms(LeafReader reader, String fieldName, MatchingTermVisitor mtv)
+  public void visitMatchingTerms(
+      LeafReader reader, String fieldName, Analyzer analyzer, MatchingTermVisitor mtv)
       throws IOException {
     /* inspired by PrefixQuery.rewrite(): */
+    if (compiled == null) {
+      BytesRef prefixRef = toAnalyzedTerm(prefix, fieldName, analyzer);
+      // TODO: we may have to escape/unescape around `toAnalyzedTerm()`?
+      PrefixQuery q = new PrefixQuery(new Term(fieldName, prefixRef));
+      compiled =
+          new CompiledAutomaton(
+              q.getAutomaton(),
+              null,
+              true,
+              Operations.DEFAULT_DETERMINIZE_WORK_LIMIT,
+              q.isAutomatonBinary());
+    }
     Terms terms = reader.terms(fieldName);
     if (terms != null) {
       TermsEnum termsEnum = compiled.getTermsEnum(terms);

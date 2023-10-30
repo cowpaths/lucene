@@ -27,7 +27,7 @@ public class TestSrndQuery extends LuceneTestCase {
 
   void checkEqualParsings(String s1, String s2) throws Exception {
     String fieldName = "foo";
-    BasicQueryFactory qf = new BasicQueryFactory(16);
+    BasicQueryFactory qf = new BasicQueryFactory(16, null);
     Query lq1, lq2;
     lq1 = QueryParser.parse(s1).makeLuceneQueryField(fieldName, qf);
     lq2 = QueryParser.parse(s2).makeLuceneQueryField(fieldName, qf);

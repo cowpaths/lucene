@@ -17,6 +17,7 @@
 package org.apache.lucene.queryparser.surround.query;
 
 import java.io.IOException;
+import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.index.LeafReader;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.index.Terms;
@@ -55,7 +56,8 @@ public class SrndTruncQuery extends SimpleTerm {
   }
 
   @Override
-  public void visitMatchingTerms(LeafReader reader, String fieldName, MatchingTermVisitor mtv)
+  public void visitMatchingTerms(
+      LeafReader reader, String fieldName, Analyzer analyzer, MatchingTermVisitor mtv)
       throws IOException {
     Terms terms = reader.terms(fieldName);
     ;

@@ -46,7 +46,7 @@ abstract class RewriteQuery<SQ extends SrndQuery> extends Query {
     return new Weight(this) {
       @Override
       public Explanation explain(LeafReaderContext context, int doc) throws IOException {
-        BasicQueryFactory qf = new BasicQueryFactory(RewriteQuery.this.qf.getMaxBasicQueries());
+        BasicQueryFactory qf = new BasicQueryFactory(RewriteQuery.this.qf);
         return leafRewrite(context.reader(), qf)
             .createWeight(searcher, scoreMode, boost)
             .explain(context, doc);
@@ -54,7 +54,7 @@ abstract class RewriteQuery<SQ extends SrndQuery> extends Query {
 
       @Override
       public Scorer scorer(LeafReaderContext context) throws IOException {
-        BasicQueryFactory qf = new BasicQueryFactory(RewriteQuery.this.qf.getMaxBasicQueries());
+        BasicQueryFactory qf = new BasicQueryFactory(RewriteQuery.this.qf);
         return leafRewrite(context.reader(), qf)
             .createWeight(searcher, scoreMode, boost)
             .scorer(context);

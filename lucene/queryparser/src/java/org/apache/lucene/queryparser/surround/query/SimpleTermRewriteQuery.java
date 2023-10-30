@@ -38,6 +38,7 @@ class SimpleTermRewriteQuery extends RewriteQuery<SimpleTerm> {
     srndQuery.visitMatchingTerms(
         reader,
         fieldName,
+        qf.getAnalyzer(),
         new SimpleTerm.MatchingTermVisitor() {
           @Override
           public void visitMatchingTerm(Term term) throws IOException {
