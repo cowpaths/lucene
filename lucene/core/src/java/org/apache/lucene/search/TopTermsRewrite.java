@@ -172,7 +172,7 @@ public abstract class TopTermsRewrite<B> extends TermCollectingRewrite<B> {
       addClause(
           b, term, st.termState.docFreq(), Math.max(0.0f, st.boost), st.termState); // add to query
     }
-    return new MultiTermQuery.CacheContextQuery(build(b), cacheKey);
+    return wrap(build(b), cacheKey);
   }
 
   @Override

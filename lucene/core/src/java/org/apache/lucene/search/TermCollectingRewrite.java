@@ -35,6 +35,10 @@ abstract class TermCollectingRewrite<B> extends MultiTermQuery.RewriteMethod {
   /** Finalize the creation of the query from the builder. */
   protected abstract Query build(B builder);
 
+  protected Query wrap(Query q, Object cacheKey) {
+    return new MultiTermQuery.CacheContextQuery(q, cacheKey);
+  }
+
   /** Add a MultiTermQuery term to the top-level query builder. */
   protected final void addClause(B topLevel, Term term, int docCount, float boost)
       throws IOException {

@@ -119,7 +119,7 @@ public abstract class ScoringRewrite<B> extends TermCollectingRewrite<B> {
         addClause(builder, term, termStates[pos].docFreq(), boost[pos], termStates[pos]);
       }
     }
-    return new MultiTermQuery.CacheContextQuery(build(builder), cacheKey);
+    return wrap(build(builder), cacheKey);
   }
 
   final class ParallelArraysTermCollector extends TermCollector {
