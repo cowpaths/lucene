@@ -104,7 +104,8 @@ public abstract class ScoringRewrite<B> extends TermCollectingRewrite<B> {
   public final Query rewrite(IndexReader reader, final MultiTermQuery query) throws IOException {
     final B builder = getTopLevelBuilder();
     final ParallelArraysTermCollector col = new ParallelArraysTermCollector();
-    collectTerms(reader, query, col);
+    Object cacheKey = new Object();
+    collectTerms(reader, query, cacheKey, col);
 
     final int size = col.terms.size();
     if (size > 0) {
@@ -118,7 +119,7 @@ public abstract class ScoringRewrite<B> extends TermCollectingRewrite<B> {
         addClause(builder, term, termStates[pos].docFreq(), boost[pos], termStates[pos]);
       }
     }
-    return build(builder);
+    return new MultiTermQuery.CacheContextQuery(build(builder), cacheKey);
   }
 
   final class ParallelArraysTermCollector extends TermCollector {

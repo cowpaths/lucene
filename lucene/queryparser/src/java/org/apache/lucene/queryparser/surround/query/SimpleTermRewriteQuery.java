@@ -23,6 +23,7 @@ import org.apache.lucene.index.Term;
 import org.apache.lucene.search.BooleanClause;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.MatchNoDocsQuery;
+import org.apache.lucene.search.MultiTermQuery;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.QueryVisitor;
 
@@ -35,22 +36,26 @@ class SimpleTermRewriteQuery extends RewriteQuery<SimpleTerm> {
   @Override
   public Query rewrite(IndexSearcher indexSearcher) throws IOException {
     final List<Query> luceneSubQueries = new ArrayList<>();
+    Object cacheKey = qf.getCacheKey();
     srndQuery.visitMatchingTerms(
         indexSearcher.getIndexReader(),
         fieldName,
+        cacheKey,
         new SimpleTerm.MatchingTermVisitor() {
           @Override
           public void visitMatchingTerm(Term term) throws IOException {
             luceneSubQueries.add(qf.newTermQuery(term));
           }
         });
-    return (luceneSubQueries.size() == 0)
-        ? new MatchNoDocsQuery()
-        : (luceneSubQueries.size() == 1)
-            ? luceneSubQueries.get(0)
-            : SrndBooleanQuery.makeBooleanQuery(
-                /* luceneSubQueries all have default weight */
-                luceneSubQueries, BooleanClause.Occur.SHOULD); /* OR the subquery terms */
+    Query ret =
+        (luceneSubQueries.size() == 0)
+            ? new MatchNoDocsQuery()
+            : (luceneSubQueries.size() == 1)
+                ? luceneSubQueries.get(0)
+                : SrndBooleanQuery.makeBooleanQuery(
+                    /* luceneSubQueries all have default weight */
+                    luceneSubQueries, BooleanClause.Occur.SHOULD); /* OR the subquery terms */
+    return new MultiTermQuery.CacheContextQuery(ret, cacheKey);
   }
 
   @Override
