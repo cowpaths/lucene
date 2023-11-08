@@ -54,7 +54,7 @@ Operations:
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.Iterator;
-import org.apache.lucene.index.LeafReader;
+import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.queries.spans.SpanOrQuery;
 import org.apache.lucene.queries.spans.SpanQuery;
@@ -64,19 +64,19 @@ import org.apache.lucene.search.Query;
 
 /** Factory for {@link SpanOrQuery} */
 public class SpanNearClauseFactory { // FIXME: rename to SpanClauseFactory
-  public SpanNearClauseFactory(LeafReader reader, String fieldName, BasicQueryFactory qf) {
+  public SpanNearClauseFactory(IndexReader reader, String fieldName, BasicQueryFactory qf) {
     this.reader = reader;
     this.fieldName = fieldName;
     this.weightBySpanQuery = new HashMap<>();
     this.qf = qf;
   }
 
-  private LeafReader reader;
+  private IndexReader reader;
   private String fieldName;
   private HashMap<SpanQuery, Float> weightBySpanQuery;
   private BasicQueryFactory qf;
 
-  public LeafReader getIndexReader() {
+  public IndexReader getIndexReader() {
     return reader;
   }
 

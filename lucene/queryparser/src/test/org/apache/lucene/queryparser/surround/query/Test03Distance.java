@@ -70,7 +70,7 @@ public class Test03Distance extends LuceneTestCase {
   private void distanceTst(String query, int[] expdnrs, SingleFieldTestDb db) throws Exception {
     BooleanQueryTestFacade tbq =
         new BooleanQueryTestFacade(
-            query, expdnrs, db, fieldName, this, new BasicQueryFactory(maxBasicQueries, null));
+            query, expdnrs, db, fieldName, this, new BasicQueryFactory(maxBasicQueries));
     tbq.setVerbose(verbose);
     tbq.doTest();
   }

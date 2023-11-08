@@ -17,8 +17,8 @@
 package org.apache.lucene.queryparser.surround.query;
 
 import java.io.IOException;
-import org.apache.lucene.analysis.Analyzer;
-import org.apache.lucene.index.LeafReader;
+import org.apache.lucene.index.IndexReader;
+import org.apache.lucene.index.MultiTerms;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.index.Terms;
 import org.apache.lucene.index.TermsEnum;
@@ -32,7 +32,6 @@ public class SrndTermQuery extends SimpleTerm {
   }
 
   private final String termText;
-  private BytesRef analyzed = null;
 
   public String getTermText() {
     return termText;
@@ -48,18 +47,14 @@ public class SrndTermQuery extends SimpleTerm {
   }
 
   @Override
-  public void visitMatchingTerms(
-      LeafReader reader, String fieldName, Analyzer analyzer, MatchingTermVisitor mtv)
+  public void visitMatchingTerms(IndexReader reader, String fieldName, MatchingTermVisitor mtv)
       throws IOException {
     /* check term presence in index here for symmetry with other SimpleTerm's */
-    if (analyzed == null) {
-      analyzed = toAnalyzedTerm(termText, fieldName, analyzer);
-    }
-    Terms terms = reader.terms(fieldName);
+    Terms terms = MultiTerms.getTerms(reader, fieldName);
     if (terms != null) {
       TermsEnum termsEnum = terms.iterator();
 
-      TermsEnum.SeekStatus status = termsEnum.seekCeil(analyzed);
+      TermsEnum.SeekStatus status = termsEnum.seekCeil(new BytesRef(getTermText()));
       if (status == TermsEnum.SeekStatus.FOUND) {
         mtv.visitMatchingTerm(getLuceneTerm(fieldName));
       }

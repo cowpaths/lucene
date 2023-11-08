@@ -17,8 +17,8 @@
 package org.apache.lucene.queryparser.surround.query;
 
 import java.io.IOException;
-import org.apache.lucene.analysis.Analyzer;
-import org.apache.lucene.index.LeafReader;
+import org.apache.lucene.index.IndexReader;
+import org.apache.lucene.index.MultiTerms;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.index.Terms;
 import org.apache.lucene.index.TermsEnum;
@@ -32,10 +32,19 @@ public class SrndTruncQuery extends SimpleTerm {
   public SrndTruncQuery(String truncated) {
     super(false); /* not quoted */
     this.truncated = truncated;
+    WildcardQuery wc =
+        new WildcardQuery(new Term("dummy", truncated), Operations.DEFAULT_DETERMINIZE_WORK_LIMIT);
+    compiled =
+        new CompiledAutomaton(
+            wc.getAutomaton(),
+            null,
+            true,
+            Operations.DEFAULT_DETERMINIZE_WORK_LIMIT,
+            wc.isAutomatonBinary());
   }
 
   private final String truncated;
-  private CompiledAutomaton compiled;
+  private final CompiledAutomaton compiled;
 
   public String getTruncated() {
     return truncated;
@@ -47,28 +56,9 @@ public class SrndTruncQuery extends SimpleTerm {
   }
 
   @Override
-  public void visitMatchingTerms(
-      LeafReader reader, String fieldName, Analyzer analyzer, MatchingTermVisitor mtv)
+  public void visitMatchingTerms(IndexReader reader, String fieldName, MatchingTermVisitor mtv)
       throws IOException {
-    if (compiled == null) {
-      BytesRef wildcardRef = toAnalyzedTerm(truncated, fieldName, analyzer);
-      // TODO: there could be some URL-encoded terms that decode to wildcard characters.
-      //  we either have to figure out how to escape these (if that's possible, which I
-      //  think it should be?), or altogether abandon the idea of analyzed indexed terms
-      //  (and the attendant benefits for ngram/maxSubstring.
-      WildcardQuery wc =
-          new WildcardQuery(
-              new Term(fieldName, wildcardRef), Operations.DEFAULT_DETERMINIZE_WORK_LIMIT);
-      compiled =
-          new CompiledAutomaton(
-              wc.getAutomaton(),
-              null,
-              true,
-              Operations.DEFAULT_DETERMINIZE_WORK_LIMIT,
-              wc.isAutomatonBinary());
-    }
-    Terms terms = reader.terms(fieldName);
-
+    Terms terms = MultiTerms.getTerms(reader, fieldName);
     if (terms != null) {
       TermsEnum termsEnum = compiled.getTermsEnum(terms);
 

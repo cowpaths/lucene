@@ -17,8 +17,8 @@
 package org.apache.lucene.queryparser.surround.query;
 
 import java.io.IOException;
-import org.apache.lucene.analysis.Analyzer;
-import org.apache.lucene.index.LeafReader;
+import org.apache.lucene.index.IndexReader;
+import org.apache.lucene.index.MultiTerms;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.index.Terms;
 import org.apache.lucene.index.TermsEnum;
@@ -29,11 +29,21 @@ import org.apache.lucene.util.automaton.Operations;
 
 /** Query that matches String prefixes */
 public class SrndPrefixQuery extends SimpleTerm {
-  private CompiledAutomaton compiled;
+  private final BytesRef prefixRef;
+  private final CompiledAutomaton compiled;
 
   public SrndPrefixQuery(String prefix, boolean quoted, char truncator) {
     super(quoted);
     this.prefix = prefix;
+    prefixRef = new BytesRef(prefix);
+    PrefixQuery q = new PrefixQuery(new Term("dummy", prefixRef));
+    compiled =
+        new CompiledAutomaton(
+            q.getAutomaton(),
+            null,
+            true,
+            Operations.DEFAULT_DETERMINIZE_WORK_LIMIT,
+            q.isAutomatonBinary());
     this.truncator = truncator;
   }
 
@@ -60,23 +70,10 @@ public class SrndPrefixQuery extends SimpleTerm {
   }
 
   @Override
-  public void visitMatchingTerms(
-      LeafReader reader, String fieldName, Analyzer analyzer, MatchingTermVisitor mtv)
+  public void visitMatchingTerms(IndexReader reader, String fieldName, MatchingTermVisitor mtv)
       throws IOException {
     /* inspired by PrefixQuery.rewrite(): */
-    if (compiled == null) {
-      BytesRef prefixRef = toAnalyzedTerm(prefix, fieldName, analyzer);
-      // TODO: we may have to escape/unescape around `toAnalyzedTerm()`?
-      PrefixQuery q = new PrefixQuery(new Term(fieldName, prefixRef));
-      compiled =
-          new CompiledAutomaton(
-              q.getAutomaton(),
-              null,
-              true,
-              Operations.DEFAULT_DETERMINIZE_WORK_LIMIT,
-              q.isAutomatonBinary());
-    }
-    Terms terms = reader.terms(fieldName);
+    Terms terms = MultiTerms.getTerms(reader, fieldName);
     if (terms != null) {
       TermsEnum termsEnum = compiled.getTermsEnum(terms);
 

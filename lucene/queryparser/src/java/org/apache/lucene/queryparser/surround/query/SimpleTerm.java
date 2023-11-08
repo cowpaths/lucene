@@ -17,13 +17,9 @@
 package org.apache.lucene.queryparser.surround.query;
 
 import java.io.IOException;
-import org.apache.lucene.analysis.Analyzer;
-import org.apache.lucene.analysis.TokenStream;
-import org.apache.lucene.analysis.tokenattributes.TermToBytesRefAttribute;
-import org.apache.lucene.index.LeafReader;
+import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.search.Query;
-import org.apache.lucene.util.BytesRef;
 
 /** Base class for queries that expand to sets of simple terms. */
 public abstract class SimpleTerm extends SrndQuery implements DistanceSubQuery {
@@ -49,28 +45,6 @@ public abstract class SimpleTerm extends SrndQuery implements DistanceSubQuery {
 
   protected void suffixToString(StringBuilder r) {} /* override for prefix query */
 
-  protected static BytesRef toAnalyzedTerm(String term, String fieldName, Analyzer analyzer)
-      throws IOException {
-    if (analyzer == null) {
-      return new BytesRef(term);
-    }
-    BytesRef ret;
-    try (TokenStream ts = analyzer.tokenStream(fieldName, term)) {
-      TermToBytesRefAttribute termAtt = ts.getAttribute(TermToBytesRefAttribute.class);
-      ts.reset();
-      if (!ts.incrementToken()) {
-        ret = new BytesRef();
-      } else {
-        ret = BytesRef.deepCopyOf(termAtt.getBytesRef());
-      }
-      if (ts.incrementToken()) {
-        throw new IllegalArgumentException("term contains more than one token: \"" + term + "\"");
-      }
-      ts.end();
-    }
-    return ret;
-  }
-
   @Override
   public String toString() {
     StringBuilder r = new StringBuilder();
@@ -87,8 +61,7 @@ public abstract class SimpleTerm extends SrndQuery implements DistanceSubQuery {
   }
 
   public abstract void visitMatchingTerms(
-      LeafReader reader, String fieldName, Analyzer analyzer, MatchingTermVisitor mtv)
-      throws IOException;
+      IndexReader reader, String fieldName, MatchingTermVisitor mtv) throws IOException;
 
   /** Callback to visit each matching term during "rewrite" in {@link #visitMatchingTerm(Term)} */
   public interface MatchingTermVisitor {
@@ -105,7 +78,6 @@ public abstract class SimpleTerm extends SrndQuery implements DistanceSubQuery {
     visitMatchingTerms(
         sncf.getIndexReader(),
         sncf.getFieldName(),
-        sncf.getBasicQueryFactory().getAnalyzer(),
         new MatchingTermVisitor() {
           @Override
           public void visitMatchingTerm(Term term) throws IOException {

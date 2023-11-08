@@ -17,7 +17,7 @@
 package org.apache.lucene.queryparser.surround.query;
 
 import java.io.IOException;
-import org.apache.lucene.index.LeafReader;
+import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.Query;
 import org.apache.lucene.search.QueryVisitor;
 
@@ -28,8 +28,8 @@ class DistanceRewriteQuery extends RewriteQuery<DistanceQuery> {
   }
 
   @Override
-  public Query leafRewrite(LeafReader reader, BasicQueryFactory qf) throws IOException {
-    return srndQuery.getSpanNearQuery(reader, fieldName, qf);
+  public Query rewrite(IndexSearcher indexSearcher) throws IOException {
+    return srndQuery.getSpanNearQuery(indexSearcher.getIndexReader(), fieldName, qf);
   }
 
   @Override
