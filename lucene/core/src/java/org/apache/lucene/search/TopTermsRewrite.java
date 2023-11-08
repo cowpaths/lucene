@@ -64,9 +64,11 @@ public abstract class TopTermsRewrite<B> extends TermCollectingRewrite<B> {
   public final Query rewrite(IndexReader reader, final MultiTermQuery query) throws IOException {
     final int maxSize = Math.min(size, getMaxSize());
     final PriorityQueue<ScoreTerm> stQueue = new PriorityQueue<>();
+    Object cacheKey = new Object();
     collectTerms(
         reader,
         query,
+        cacheKey,
         new TermCollector() {
           private final MaxNonCompetitiveBoostAttribute maxBoostAtt =
               attributes.addAttribute(MaxNonCompetitiveBoostAttribute.class);
@@ -170,7 +172,7 @@ public abstract class TopTermsRewrite<B> extends TermCollectingRewrite<B> {
       addClause(
           b, term, st.termState.docFreq(), Math.max(0.0f, st.boost), st.termState); // add to query
     }
-    return build(b);
+    return wrap(build(b), cacheKey);
   }
 
   @Override

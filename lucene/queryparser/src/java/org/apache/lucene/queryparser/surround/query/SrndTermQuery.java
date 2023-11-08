@@ -47,7 +47,7 @@ public class SrndTermQuery extends SimpleTerm {
   }
 
   @Override
-  public void visitMatchingTerms(IndexReader reader, String fieldName, MatchingTermVisitor mtv)
+  public void visitMatchingTerms(IndexReader reader, String fieldName, Object cacheKey, MatchingTermVisitor mtv)
       throws IOException {
     /* check term presence in index here for symmetry with other SimpleTerm's */
     Terms terms = MultiTerms.getTerms(reader, fieldName);

@@ -35,6 +35,10 @@ abstract class TermCollectingRewrite<B> extends MultiTermQuery.RewriteMethod {
   /** Finalize the creation of the query from the builder. */
   protected abstract Query build(B builder);
 
+  protected Query wrap(Query q, Object cacheKey) {
+    return new MultiTermQuery.CacheContextQuery(q, cacheKey);
+  }
+
   /** Add a MultiTermQuery term to the top-level query builder. */
   protected final void addClause(B topLevel, Term term, int docCount, float boost)
       throws IOException {
@@ -44,11 +48,12 @@ abstract class TermCollectingRewrite<B> extends MultiTermQuery.RewriteMethod {
   protected abstract void addClause(
       B topLevel, Term term, int docCount, float boost, TermStates states) throws IOException;
 
-  final void collectTerms(IndexReader reader, MultiTermQuery query, TermCollector collector)
+  final void collectTerms(
+      IndexReader reader, MultiTermQuery query, Object cacheKey, TermCollector collector)
       throws IOException {
     IndexReaderContext topReaderContext = reader.getContext();
     for (LeafReaderContext context : topReaderContext.leaves()) {
-      final Terms terms = context.reader().terms(query.field);
+      final Terms terms = MultiTermQuery.maybeWrap(context.reader().terms(query.field), cacheKey);
       if (terms == null) {
         // field does not exist
         continue;

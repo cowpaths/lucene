@@ -61,7 +61,7 @@ public abstract class SimpleTerm extends SrndQuery implements DistanceSubQuery {
   }
 
   public abstract void visitMatchingTerms(
-      IndexReader reader, String fieldName, MatchingTermVisitor mtv) throws IOException;
+      IndexReader reader, String fieldName, Object cacheKey, MatchingTermVisitor mtv) throws IOException;
 
   /** Callback to visit each matching term during "rewrite" in {@link #visitMatchingTerm(Term)} */
   public interface MatchingTermVisitor {
@@ -78,6 +78,7 @@ public abstract class SimpleTerm extends SrndQuery implements DistanceSubQuery {
     visitMatchingTerms(
         sncf.getIndexReader(),
         sncf.getFieldName(),
+        sncf.getBasicQueryFactory().getCacheKey(),
         new MatchingTermVisitor() {
           @Override
           public void visitMatchingTerm(Term term) throws IOException {

@@ -165,6 +165,11 @@ public class SpanMultiTermQueryWrapper<Q extends MultiTermQuery> extends SpanQue
               }
 
               @Override
+              protected Query wrap(Query q, Object cacheKey) {
+                return new CacheContextSpanQuery((SpanQuery) q, cacheKey);
+              }
+
+              @Override
               protected void checkMaxClauseCount(int count) {
                 // we accept all terms as SpanOrQuery has no limits
               }
@@ -186,6 +191,51 @@ public class SpanMultiTermQueryWrapper<Q extends MultiTermQuery> extends SpanQue
           return (SpanQuery) delegate.rewrite(reader, query);
         }
       };
+
+  public static final class CacheContextSpanQuery extends SpanQuery {
+    private final SpanQuery delegate;
+    private final Object cacheKey;
+    public CacheContextSpanQuery(SpanQuery delegate, Object cacheKey) {
+      this.delegate = delegate;
+      this.cacheKey = cacheKey;
+    }
+    @Override
+    public String toString(String field) {
+      return delegate.toString(field);
+    }
+    @Override
+    @Deprecated
+    public Query rewrite(IndexReader reader) throws IOException {
+      return delegate.rewrite(reader);
+    }
+    @Override
+    public Query rewrite(IndexSearcher indexSearcher) throws IOException {
+      return delegate.rewrite(indexSearcher);
+    }
+    @Override
+    public void visit(QueryVisitor visitor) {
+      delegate.visit(visitor);
+    }
+    @Override
+    public boolean equals(Object o) {
+      if (this == o) return true;
+      if (o == null || getClass() != o.getClass()) return false;
+      CacheContextSpanQuery that = (CacheContextSpanQuery) o;
+      return delegate.equals(that.delegate) && cacheKey.equals(that.cacheKey);
+    }
+    @Override
+    public int hashCode() {
+      return delegate.hashCode() ^ cacheKey.hashCode();
+    }
+    @Override
+    public String getField() {
+      return delegate.getField();
+    }
+    @Override
+    public SpanWeight createWeight(IndexSearcher searcher, ScoreMode scoreMode, float boost) throws IOException {
+      return delegate.createWeight(searcher, scoreMode, boost);
+    }
+  }
 
   /**
    * A rewrite method that first translates each term into a SpanTermQuery in a {@link Occur#SHOULD}
@@ -216,6 +266,11 @@ public class SpanMultiTermQueryWrapper<Q extends MultiTermQuery> extends SpanQue
             @Override
             protected Query build(List<SpanQuery> builder) {
               return new SpanOrQuery(builder.toArray(new SpanQuery[builder.size()]));
+            }
+
+            @Override
+            protected Query wrap(Query q, Object cacheKey) {
+              return new CacheContextSpanQuery((SpanQuery) q, cacheKey);
             }
 
             @Override

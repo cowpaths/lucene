@@ -18,6 +18,7 @@ package org.apache.lucene.search;
 
 import java.io.IOException;
 import java.util.Objects;
+import org.apache.lucene.index.FilterLeafReader;
 import org.apache.lucene.index.FilteredTermsEnum;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.SingleTermsEnum;
@@ -27,6 +28,8 @@ import org.apache.lucene.index.Terms;
 import org.apache.lucene.index.TermsEnum;
 import org.apache.lucene.search.BooleanQuery.Builder;
 import org.apache.lucene.util.AttributeSource;
+import org.apache.lucene.util.BytesRef;
+import org.apache.lucene.util.automaton.CompiledAutomaton;
 
 /**
  * An abstract {@link Query} that matches documents containing a subset of terms provided by a
@@ -66,6 +69,85 @@ public abstract class MultiTermQuery extends Query {
         throws IOException {
       return query.getTermsEnum(
           terms, atts); // allow RewriteMethod subclasses to pull a TermsEnum from the MTQ
+    }
+  }
+
+  public static Terms maybeWrap(Terms in, Object cacheKey) {
+    if (cacheKey != null && in instanceof CacheIntersectTerms) {
+      return new CacheContextTerms(in, cacheKey);
+    } else {
+      return in;
+    }
+  }
+
+  private static class CacheContextTerms extends FilterLeafReader.FilterTerms {
+    private final Object cacheKey;
+    private final CacheIntersectTerms t;
+
+    protected CacheContextTerms(Terms in, Object cacheKey) {
+      super(in);
+      this.cacheKey = cacheKey;
+      this.t = (CacheIntersectTerms) in;
+    }
+
+    @Override
+    public TermsEnum intersect(CompiledAutomaton compiled, BytesRef startTerm) throws IOException {
+      return t.intersect(compiled, startTerm, cacheKey);
+    }
+  }
+
+  public interface CacheIntersectTerms {
+    TermsEnum intersect(CompiledAutomaton compiled, BytesRef startTerm, Object cacheKey)
+        throws IOException;
+  }
+
+  public static class CacheContextQuery extends Query {
+    private final Query delegate;
+    private final Object cacheKey;
+
+    public CacheContextQuery(Query delegate, Object cacheKey) {
+      this.delegate = delegate;
+      this.cacheKey = cacheKey;
+    }
+
+    @Override
+    public String toString(String field) {
+      return delegate.toString(field);
+    }
+
+    @Override
+    public Weight createWeight(IndexSearcher searcher, ScoreMode scoreMode, float boost)
+        throws IOException {
+      return delegate.createWeight(searcher, scoreMode, boost);
+    }
+
+    @Override
+    @Deprecated
+    public Query rewrite(IndexReader reader) throws IOException {
+      return delegate.rewrite(reader);
+    }
+
+    @Override
+    public Query rewrite(IndexSearcher indexSearcher) throws IOException {
+      return delegate.rewrite(indexSearcher);
+    }
+
+    @Override
+    public void visit(QueryVisitor visitor) {
+      delegate.visit(visitor);
+    }
+
+    @Override
+    public boolean equals(Object o) {
+      if (this == o) return true;
+      if (o == null || getClass() != o.getClass()) return false;
+      CacheContextQuery that = (CacheContextQuery) o;
+      return delegate.equals(that.delegate) && cacheKey.equals(that.cacheKey);
+    }
+
+    @Override
+    public int hashCode() {
+      return delegate.hashCode() ^ cacheKey.hashCode();
     }
   }
 

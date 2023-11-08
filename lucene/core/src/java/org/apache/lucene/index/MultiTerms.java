@@ -19,6 +19,7 @@ package org.apache.lucene.index;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+import org.apache.lucene.search.MultiTermQuery;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.automaton.CompiledAutomaton;
 
@@ -68,9 +69,14 @@ public final class MultiTerms extends Terms {
 
   /** This method may return null if the field does not exist or if it has no terms. */
   public static Terms getTerms(IndexReader r, String field) throws IOException {
+    return getTerms(r, field, null);
+  }
+
+  /** This method may return null if the field does not exist or if it has no terms. */
+  public static Terms getTerms(IndexReader r, String field, Object cacheKey) throws IOException {
     final List<LeafReaderContext> leaves = r.leaves();
     if (leaves.size() == 1) {
-      return leaves.get(0).reader().terms(field);
+      return MultiTermQuery.maybeWrap(leaves.get(0).reader().terms(field), cacheKey);
     }
 
     final List<Terms> termsPerLeaf = new ArrayList<>(leaves.size());
@@ -78,7 +84,7 @@ public final class MultiTerms extends Terms {
 
     for (int leafIdx = 0; leafIdx < leaves.size(); leafIdx++) {
       LeafReaderContext ctx = leaves.get(leafIdx);
-      Terms subTerms = ctx.reader().terms(field);
+      Terms subTerms = MultiTermQuery.maybeWrap(ctx.reader().terms(field), cacheKey);
       if (subTerms != null) {
         termsPerLeaf.add(subTerms);
         slicePerLeaf.add(new ReaderSlice(ctx.docBase, r.maxDoc(), leafIdx));

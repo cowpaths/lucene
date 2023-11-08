@@ -22,6 +22,7 @@ import org.apache.lucene.index.MultiTerms;
 import org.apache.lucene.index.Term;
 import org.apache.lucene.index.Terms;
 import org.apache.lucene.index.TermsEnum;
+import org.apache.lucene.search.MultiTermQuery;
 import org.apache.lucene.search.WildcardQuery;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.automaton.CompiledAutomaton;
@@ -56,9 +57,9 @@ public class SrndTruncQuery extends SimpleTerm {
   }
 
   @Override
-  public void visitMatchingTerms(IndexReader reader, String fieldName, MatchingTermVisitor mtv)
+  public void visitMatchingTerms(IndexReader reader, String fieldName, Object cacheKey, MatchingTermVisitor mtv)
       throws IOException {
-    Terms terms = MultiTerms.getTerms(reader, fieldName);
+    Terms terms = MultiTerms.getTerms(reader, fieldName, cacheKey);
     if (terms != null) {
       TermsEnum termsEnum = compiled.getTermsEnum(terms);
 

@@ -41,6 +41,7 @@ public class BasicQueryFactory {
 
   private int maxBasicQueries;
   private int queriesMade;
+  private final Object cacheKey = new Object();
 
   public int getNrQueriesMade() {
     return queriesMade;
@@ -93,5 +94,9 @@ public class BasicQueryFactory {
     if (!(obj instanceof BasicQueryFactory)) return false;
     BasicQueryFactory other = (BasicQueryFactory) obj;
     return atMax() == other.atMax();
+  }
+
+  public Object getCacheKey() {
+    return cacheKey;
   }
 }
