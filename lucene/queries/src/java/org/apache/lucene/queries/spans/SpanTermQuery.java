@@ -30,6 +30,7 @@ import org.apache.lucene.index.TermStates;
 import org.apache.lucene.index.Terms;
 import org.apache.lucene.index.TermsEnum;
 import org.apache.lucene.search.IndexSearcher;
+import org.apache.lucene.search.PooledPostingsUtil;
 import org.apache.lucene.search.QueryVisitor;
 import org.apache.lucene.search.ScoreMode;
 
@@ -155,8 +156,14 @@ public class SpanTermQuery extends SpanQuery {
       final TermsEnum termsEnum = terms.iterator();
       termsEnum.seekExact(term.bytes(), state);
 
-      final PostingsEnum postings =
-          termsEnum.postings(null, requiredPostings.getRequiredPostings());
+      PostingsEnum postings = null;
+      if (PooledPostingsUtil.isEnabled()) {
+        postings = PooledPostingsUtil.getPostings(termsEnum, requiredPostings.getRequiredPostings());
+      }
+      if (postings == null) {
+        termsEnum.postings(null, requiredPostings.getRequiredPostings());
+      }
+
       float positionsCost = termPositionsCost(termsEnum) * PHRASE_TO_SPAN_TERM_POSITIONS_COST;
       return new TermSpans(getSimScorer(context), postings, term, positionsCost);
     }

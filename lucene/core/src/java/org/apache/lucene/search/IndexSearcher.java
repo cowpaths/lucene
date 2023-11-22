@@ -30,6 +30,7 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.Future;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.index.DirectoryReader;
@@ -767,25 +768,45 @@ public class IndexSearcher {
         // continue with the following leaf
         continue;
       }
-      BulkScorer scorer = weight.bulkScorer(ctx);
-      if (scorer != null) {
-        if (queryTimeout != null) {
-          scorer = new TimeLimitingBulkScorer(scorer, queryTimeout);
-        }
-        try {
-          scorer.score(leafCollector, ctx.reader().getLiveDocs());
-        } catch (
-            @SuppressWarnings("unused")
-            CollectionTerminatedException e) {
-          // collection was terminated prematurely
-          // continue with the following leaf
-        } catch (
-            @SuppressWarnings("unused")
-            TimeLimitingBulkScorer.TimeExceededException e) {
-          partialResult = true;
-        }
+
+      if (estimatePostingEnumCounts(weight) >= 1000) {
+        PooledPostingsUtil.enablePool();
       }
+      try {
+        BulkScorer scorer = weight.bulkScorer(ctx);
+        if (scorer != null) {
+          if (queryTimeout != null) {
+            scorer = new TimeLimitingBulkScorer(scorer, queryTimeout);
+          }
+          try {
+            scorer.score(leafCollector, ctx.reader().getLiveDocs());
+          } catch (
+                  @SuppressWarnings("unused")
+                  CollectionTerminatedException e) {
+            // collection was terminated prematurely
+            // continue with the following leaf
+          } catch (
+                  @SuppressWarnings("unused")
+                  TimeLimitingBulkScorer.TimeExceededException e) {
+            partialResult = true;
+          }
+        }
+      } finally {
+        PooledPostingsUtil.disablePool();
+      }
+
     }
+  }
+
+  private int estimatePostingEnumCounts(Weight weight) {
+    AtomicInteger count = new AtomicInteger();
+    weight.getQuery().visit(new QueryVisitor() {
+      @Override
+      public void consumeTerms(Query query, Term... terms) {
+        count.addAndGet(terms.length);
+      }
+    });
+    return count.get();
   }
 
   /**
