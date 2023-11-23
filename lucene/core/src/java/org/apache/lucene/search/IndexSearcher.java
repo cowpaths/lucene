@@ -799,6 +799,9 @@ public class IndexSearcher {
   }
 
   private int estimatePostingEnumCounts(Weight weight) {
+    if (weight == null) {
+      return 0;
+    }
     AtomicInteger count = new AtomicInteger();
     weight.getQuery().visit(new QueryVisitor() {
       @Override
