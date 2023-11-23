@@ -161,7 +161,7 @@ public class SpanTermQuery extends SpanQuery {
         postings = PooledPostingsUtil.getPostings(termsEnum, requiredPostings.getRequiredPostings());
       }
       if (postings == null) {
-        termsEnum.postings(null, requiredPostings.getRequiredPostings());
+        postings = termsEnum.postings(null, requiredPostings.getRequiredPostings());
       }
 
       float positionsCost = termPositionsCost(termsEnum) * PHRASE_TO_SPAN_TERM_POSITIONS_COST;
