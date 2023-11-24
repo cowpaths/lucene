@@ -213,6 +213,7 @@ public class MultiCollector implements Collector {
       }
     }
 
+    // NOTE: not propagating collect(DocIdStream) since DocIdStreams may only be consumed once.
     @Override
     public void collect(int doc) throws IOException {
       for (int i = 0; i < collectors.length; i++) {
@@ -223,11 +224,21 @@ public class MultiCollector implements Collector {
           } catch (
               @SuppressWarnings("unused")
               CollectionTerminatedException e) {
+            collectors[i].finish();
             collectors[i] = null;
             if (allCollectorsTerminated()) {
               throw new CollectionTerminatedException();
             }
           }
+        }
+      }
+    }
+
+    @Override
+    public void finish() throws IOException {
+      for (LeafCollector collector : collectors) {
+        if (collector != null) {
+          collector.finish();
         }
       }
     }
