@@ -44,6 +44,7 @@ import org.apache.lucene.index.SegmentReadState;
 import org.apache.lucene.index.SegmentWriteState;
 import org.apache.lucene.index.Terms;
 import org.apache.lucene.util.CollectionUtil;
+import org.apache.lucene.util.IOFunction;
 import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.MergedIterator;
 
@@ -279,6 +280,16 @@ public abstract class PerFieldPostingsFormat extends PostingsFormat {
     }
   }
 
+  public interface FieldsProducerWrapFunction {
+    FieldsProducer wrap(PostingsFormat pf, FieldsProducer fp);
+  }
+
+  private static FieldsProducerWrapFunction wrap = (pf, fp) -> fp;
+
+  public static void setWrapFunction(FieldsProducerWrapFunction func) {
+    wrap = func;
+  }
+
   private static class FieldsReader extends FieldsProducer {
 
     private final Map<String, FieldsProducer> fields = new TreeMap<>();
@@ -327,7 +338,7 @@ public abstract class PerFieldPostingsFormat extends PostingsFormat {
               if (!formats.containsKey(segmentSuffix)) {
                 formats.put(
                     segmentSuffix,
-                    format.fieldsProducer(new SegmentReadState(readState, segmentSuffix)));
+                    wrap.wrap(format, format.fieldsProducer(new SegmentReadState(readState, segmentSuffix))));
               }
               fields.put(fieldName, formats.get(segmentSuffix));
             }
