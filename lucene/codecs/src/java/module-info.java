@@ -15,6 +15,8 @@
  * limitations under the License.
  */
 
+import org.apache.lucene.codecs.pooling.PoolingPostingsFormat;
+
 /** Lucene codecs and postings formats */
 module org.apache.lucene.codecs {
   requires org.apache.lucene.core;
@@ -22,6 +24,7 @@ module org.apache.lucene.codecs {
   exports org.apache.lucene.codecs.blockterms;
   exports org.apache.lucene.codecs.blocktreeords;
   exports org.apache.lucene.codecs.bloom;
+  exports org.apache.lucene.codecs.pooling;
   exports org.apache.lucene.codecs.memory;
   exports org.apache.lucene.codecs.simpletext;
   exports org.apache.lucene.codecs.uniformsplit;
@@ -30,6 +33,7 @@ module org.apache.lucene.codecs {
   provides org.apache.lucene.codecs.PostingsFormat with
       org.apache.lucene.codecs.blocktreeords.BlockTreeOrdsPostingsFormat,
       org.apache.lucene.codecs.bloom.BloomFilteringPostingsFormat,
+      PoolingPostingsFormat,
       org.apache.lucene.codecs.memory.DirectPostingsFormat,
       org.apache.lucene.codecs.memory.FSTPostingsFormat,
       org.apache.lucene.codecs.uniformsplit.UniformSplitPostingsFormat,
