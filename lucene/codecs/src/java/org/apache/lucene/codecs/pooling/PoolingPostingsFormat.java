@@ -161,8 +161,6 @@ public class PoolingPostingsFormat extends PostingsFormat {
      *
      * <p>These values can then be used for seeking and {@link PostingsEnum} retrieval with {@link
      * PostingsPoolingTermsEnum}
-     *
-     * @throws IOException
      */
     @Override
     public TermsEnum intersect(CompiledAutomaton compiled, BytesRef startTerm) throws IOException {
@@ -195,15 +193,6 @@ public class PoolingPostingsFormat extends PostingsFormat {
      * <p>The {@code PostingsEnum} will also be restored by advancing to the document ID greater or
      * equal to the provided {@code docId} and advancing to the last read document position if
      * applicable
-     *
-     * @param raw
-     * @param ts
-     * @param term
-     * @param dest
-     * @param docId
-     * @param flags
-     * @return
-     * @throws IOException
      */
     PostingsEnum transferPostingsEnum(
         TermsEnum raw, TermState ts, BytesRef term, ThinPostingsEnum dest, int docId, int flags)
@@ -343,7 +332,6 @@ public class PoolingPostingsFormat extends PostingsFormat {
      * @return a {@code ThinPostingsEnum} which references the actual {@code PostingsEnum}, the
      *     manager might set/unset the reference to maintain the pool size (strong reference count
      *     to the {@code PostingsEnum})
-     * @throws IOException
      */
     private PostingsEnum register(TermsEnum te, TermState ts, BytesRef term, int flags)
         throws IOException {
@@ -486,11 +474,6 @@ public class PoolingPostingsFormat extends PostingsFormat {
     /**
      * Call this on advancing to new docId, this updates various internal fields which are useful
      * for sorting and restoring PostingsEnum state
-     *
-     * @param pe
-     * @param docId
-     * @return
-     * @throws IOException
      */
     private int initDoc(PostingsEnum pe, int docId) throws IOException {
       if (positionRequested && docId != DocIdSetIterator.NO_MORE_DOCS) {
