@@ -16,6 +16,11 @@
  */
 package org.apache.lucene.codecs.pooling;
 
+import java.io.IOException;
+import java.util.Iterator;
+import java.util.Set;
+import java.util.Spliterator;
+import java.util.function.Consumer;
 import org.apache.lucene.codecs.FieldsConsumer;
 import org.apache.lucene.codecs.FieldsProducer;
 import org.apache.lucene.codecs.PostingsFormat;
@@ -32,11 +37,6 @@ import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.PriorityQueue;
 import org.apache.lucene.util.automaton.CompiledAutomaton;
-import java.io.IOException;
-import java.util.Iterator;
-import java.util.Set;
-import java.util.Spliterator;
-import java.util.function.Consumer;
 
 public class PoolingPostingsFormat extends PostingsFormat {
 
@@ -49,7 +49,8 @@ public class PoolingPostingsFormat extends PostingsFormat {
     this(NAME, new Lucene90PostingsFormat(), 1, null);
   }
 
-  public PoolingPostingsFormat(String name, PostingsFormat delegate, int postingsLimit, Set<String> fieldNames) {
+  public PoolingPostingsFormat(
+      String name, PostingsFormat delegate, int postingsLimit, Set<String> fieldNames) {
     super(name);
     this.delegate = delegate;
     this.postingsLimit = postingsLimit;
@@ -66,7 +67,8 @@ public class PoolingPostingsFormat extends PostingsFormat {
     return new PoolingFieldsProducer(delegate.fieldsProducer(state), postingsLimit, fieldNames);
   }
 
-  public static PoolingFieldsProducer wrap(FieldsProducer delegate, int postingsLimit, Set<String> fieldNames) {
+  public static PoolingFieldsProducer wrap(
+      FieldsProducer delegate, int postingsLimit, Set<String> fieldNames) {
     return new PoolingFieldsProducer(delegate, postingsLimit, fieldNames);
   }
 
@@ -75,7 +77,8 @@ public class PoolingPostingsFormat extends PostingsFormat {
     private final int postingsLimit;
     private final Set<String> fieldNames;
 
-    private PoolingFieldsProducer(FieldsProducer delegate, int postingsLimit, Set<String> fieldNames) {
+    private PoolingFieldsProducer(
+        FieldsProducer delegate, int postingsLimit, Set<String> fieldNames) {
       this.delegate = delegate;
       this.postingsLimit = postingsLimit;
       this.fieldNames = fieldNames;
@@ -111,7 +114,8 @@ public class PoolingPostingsFormat extends PostingsFormat {
       return terms(field, postingsLimit, null);
     }
 
-    public Terms terms(String field, int postingsLimit, Set<String> poolPostingsFields) throws IOException {
+    public Terms terms(String field, int postingsLimit, Set<String> poolPostingsFields)
+        throws IOException {
       Terms ret = delegate.terms(field);
       if (ret == null) {
         return null;
@@ -136,9 +140,7 @@ public class PoolingPostingsFormat extends PostingsFormat {
     }
   }
 
-  /**
-   * Terms that might apply pooling on {@code PostingsEnum} from {@code intersect} operation
-   */
+  /** Terms that might apply pooling on {@code PostingsEnum} from {@code intersect} operation */
   static class PostingsPoolingTerms extends FilterLeafReader.FilterTerms {
 
     private final int postingsLimit;
@@ -153,17 +155,20 @@ public class PoolingPostingsFormat extends PostingsFormat {
       return new PostingsPoolingTermsEnum(in.iterator());
     }
 
-
     /**
-     * Performs intersection and returns a wrapped {@link TermsEnum} which produces values in collating format.
-     * <p>
-     * These values can then be used for seeking and {@link PostingsEnum} retrieval with {@link PostingsPoolingTermsEnum}
+     * Performs intersection and returns a wrapped {@link TermsEnum} which produces values in
+     * collating format.
+     *
+     * <p>These values can then be used for seeking and {@link PostingsEnum} retrieval with {@link
+     * PostingsPoolingTermsEnum}
+     *
      * @throws IOException
      */
     @Override
     public TermsEnum intersect(CompiledAutomaton compiled, BytesRef startTerm) throws IOException {
       return new FilteredTermsEnum(in.intersect(compiled, startTerm)) {
         private final PostingsManager lookup = new PostingsManager(postingsLimit);
+
         @Override
         public BytesRef next() throws IOException {
           return tenum.next();
@@ -184,10 +189,12 @@ public class PoolingPostingsFormat extends PostingsFormat {
 
   private interface PostingsPuller {
     /**
-     * Pulls the {@code PostingsEnum} of the specified raw term and set it to the provided wrapper {@code dest}
-     * <p>
-     * The {@code PostingsEnum} will also be restored by advancing to the document ID greater or equal to the provided
-     * {@code docId} and advancing to the last read document position if applicable
+     * Pulls the {@code PostingsEnum} of the specified raw term and set it to the provided wrapper
+     * {@code dest}
+     *
+     * <p>The {@code PostingsEnum} will also be restored by advancing to the document ID greater or
+     * equal to the provided {@code docId} and advancing to the last read document position if
+     * applicable
      *
      * @param raw
      * @param ts
@@ -198,16 +205,20 @@ public class PoolingPostingsFormat extends PostingsFormat {
      * @return
      * @throws IOException
      */
-    PostingsEnum transferPostingsEnum(TermsEnum raw, TermState ts, BytesRef term, ThinPostingsEnum dest, int docId, int flags) throws IOException;
+    PostingsEnum transferPostingsEnum(
+        TermsEnum raw, TermState ts, BytesRef term, ThinPostingsEnum dest, int docId, int flags)
+        throws IOException;
   }
 
   private static class PostingsPoolingTermState extends TermState {
     private PostingsManager lookup;
     private TermState delegate;
+
     private PostingsPoolingTermState(PostingsManager lookup, TermState delegate) {
       this.lookup = lookup;
       this.delegate = delegate;
     }
+
     @Override
     public void copyFrom(TermState other) {
       PostingsPoolingTermState o = (PostingsPoolingTermState) other;
@@ -217,9 +228,9 @@ public class PoolingPostingsFormat extends PostingsFormat {
   }
 
   /**
-   * Provides ability to seek on terms in collating format,
-   * see {@link PostingsPoolingTerms#intersect(CompiledAutomaton, BytesRef)}
-   * and then upon call to {@code postings}, return a pooled {@code PostingsEnum} managed by {@code PostingsManager}
+   * Provides ability to seek on terms in collating format, see {@link
+   * PostingsPoolingTerms#intersect(CompiledAutomaton, BytesRef)} and then upon call to {@code
+   * postings}, return a pooled {@code PostingsEnum} managed by {@code PostingsManager}
    */
   private static class PostingsPoolingTermsEnum extends FilteredTermsEnum {
     private PostingsManager lookup;
@@ -289,45 +300,53 @@ public class PoolingPostingsFormat extends PostingsFormat {
 
   /**
    * Manages a pool of active {@code PostingsEnum}s for a specific TermsEnum instance.
-   * <p>
-   * Many {@code PostingsEnum}s can be registered via the
-   * {@link PostingsManager#register(TermsEnum, TermState, BytesRef, int)} method but this manager only keeps
-   * {@code postingsLimit} of active {@code PostingsEnum}s by strong reference of the wrapper {@code ThinPostingsEnum}
-   * <p>
-   * Removed(inactive) {@code PostingEnums}from the pool will no longer maintain such reference, therefore made
-   * available for Garbage Collection.
+   *
+   * <p>Many {@code PostingsEnum}s can be registered via the {@link
+   * PostingsManager#register(TermsEnum, TermState, BytesRef, int)} method but this manager only
+   * keeps {@code postingsLimit} of active {@code PostingsEnum}s by strong reference of the wrapper
+   * {@code ThinPostingsEnum}
+   *
+   * <p>Removed(inactive) {@code PostingEnums}from the pool will no longer maintain such reference,
+   * therefore made available for Garbage Collection.
+   *
    * <p>
    */
   private static class PostingsManager {
     private final PriorityQueue<ThinPostingsEnum> reuseQueue;
     private PostingsEnum scratch;
     private final PostingsPuller puller;
+
     private PostingsManager(int postingsLimit) {
-      reuseQueue = new PriorityQueue<ThinPostingsEnum>(postingsLimit) {
-        @Override
-        protected boolean lessThan(ThinPostingsEnum a, ThinPostingsEnum b) {
-          return a.docId > b.docId || (a.docId == b.docId && a.trackedPosition > b.trackedPosition);
-        }
-      };
-      this.puller = (raw, termState, term, dest, targetDocId, flags) -> {
-        raw.seekExact(term, termState);
-        ThinPostingsEnum top = reuseQueue.top();
-        PostingsEnum ret = raw.postings(top.postingsEnum, flags);
-        top.postingsEnum = null;
-        dest.setPostingsEnum(ret, targetDocId);
-        reuseQueue.updateTop(dest);
-        return ret;
-      };
+      reuseQueue =
+          new PriorityQueue<ThinPostingsEnum>(postingsLimit) {
+            @Override
+            protected boolean lessThan(ThinPostingsEnum a, ThinPostingsEnum b) {
+              return a.docId > b.docId
+                  || (a.docId == b.docId && a.trackedPosition > b.trackedPosition);
+            }
+          };
+      this.puller =
+          (raw, termState, term, dest, targetDocId, flags) -> {
+            raw.seekExact(term, termState);
+            ThinPostingsEnum top = reuseQueue.top();
+            PostingsEnum ret = raw.postings(top.postingsEnum, flags);
+            top.postingsEnum = null;
+            dest.setPostingsEnum(ret, targetDocId);
+            reuseQueue.updateTop(dest);
+            return ret;
+          };
     }
 
     /**
      * Registers the {@code PostingsEnum} from the current state of {@code te} to this manager.
      *
-     * @return a {@code ThinPostingsEnum} which references the actual {@code PostingsEnum}, the manager might
-     * set/unset the reference to maintain the pool size (strong reference count to the {@code PostingsEnum})
+     * @return a {@code ThinPostingsEnum} which references the actual {@code PostingsEnum}, the
+     *     manager might set/unset the reference to maintain the pool size (strong reference count
+     *     to the {@code PostingsEnum})
      * @throws IOException
      */
-    private PostingsEnum register(TermsEnum te, TermState ts, BytesRef term, int flags) throws IOException {
+    private PostingsEnum register(TermsEnum te, TermState ts, BytesRef term, int flags)
+        throws IOException {
       PostingsEnum pe = te.postings(scratch, flags);
       int initialDoc = pe.nextDoc();
       assert initialDoc != PostingsEnum.NO_MORE_DOCS;
@@ -344,15 +363,15 @@ public class PoolingPostingsFormat extends PostingsFormat {
   }
 
   /**
-   * Wraps a {@code PostingsEnum} as a field reference. Take note that this field could be set/unset by
-   * the {@link PostingsPuller}.
-   *
+   * Wraps a {@code PostingsEnum} as a field reference. Take note that this field could be set/unset
+   * by the {@link PostingsPuller}.
    */
   private static class ThinPostingsEnum extends PostingsEnum {
     private final TermsEnum raw;
 
-    //the index to look up the TermState for fast seeking on the raw {@code TermsEnum}, this index refers to the value
-    //returned by the {@code PostingsManager#add} method
+    // the index to look up the TermState for fast seeking on the raw {@code TermsEnum}, this index
+    // refers to the value
+    // returned by the {@code PostingsManager#add} method
     private final TermState termState;
     private final BytesRef term;
     private final PostingsPuller pullPostings;
@@ -368,11 +387,18 @@ public class PoolingPostingsFormat extends PostingsFormat {
     int docId;
     int freq;
     int trackedPosition = -1;
-    int positionsRemaining; //to resume the position if the posting enum is restored
+    int positionsRemaining; // to resume the position if the posting enum is restored
     final long cost;
     boolean initialPeekDoc = true;
 
-    private ThinPostingsEnum(TermsEnum raw, TermState ts, BytesRef term, PostingsEnum postingsEnum, int flags, PostingsPuller pullPostings) throws IOException {
+    private ThinPostingsEnum(
+        TermsEnum raw,
+        TermState ts,
+        BytesRef term,
+        PostingsEnum postingsEnum,
+        int flags,
+        PostingsPuller pullPostings)
+        throws IOException {
       this.raw = raw;
       this.termState = ts;
       this.term = term;
@@ -398,7 +424,7 @@ public class PoolingPostingsFormat extends PostingsFormat {
         return docId;
       }
       if (postingsEnum == null) {
-        //pull the PostingsEnum back. this.docId + 1 to advance to docId >= such id
+        // pull the PostingsEnum back. this.docId + 1 to advance to docId >= such id
         pullPostings.transferPostingsEnum(raw, termState, term, this, this.docId + 1, flags);
         return this.docId;
       } else {
@@ -458,8 +484,9 @@ public class PoolingPostingsFormat extends PostingsFormat {
     }
 
     /**
-     * Call this on advancing to new docId, this updates various internal fields which are useful for
-     * sorting and restoring PostingsEnum state
+     * Call this on advancing to new docId, this updates various internal fields which are useful
+     * for sorting and restoring PostingsEnum state
+     *
      * @param pe
      * @param docId
      * @return
@@ -477,8 +504,9 @@ public class PoolingPostingsFormat extends PostingsFormat {
     private PostingsEnum getPostingsEnum() throws IOException {
       if (postingsEnum == null) {
         int targetDocId = docId;
-        PostingsEnum ret = pullPostings.transferPostingsEnum(raw, termState, term, this, targetDocId, flags);
-        assert docId == targetDocId : "nope1 "+docId+" != "+targetDocId;
+        PostingsEnum ret =
+            pullPostings.transferPostingsEnum(raw, termState, term, this, targetDocId, flags);
+        assert docId == targetDocId : "nope1 " + docId + " != " + targetDocId;
         return ret;
       } else {
         assert postingsEnum.docID() == docId;
@@ -507,7 +535,7 @@ public class PoolingPostingsFormat extends PostingsFormat {
             this.payload = payload == null ? null : BytesRef.deepCopyOf(payload);
           }
           int atPosition = pe.nextPosition();
-          assert atPosition == trackedPosition : "nope2 "+atPosition+" != "+trackedPosition;
+          assert atPosition == trackedPosition : "nope2 " + atPosition + " != " + trackedPosition;
         }
       }
     }

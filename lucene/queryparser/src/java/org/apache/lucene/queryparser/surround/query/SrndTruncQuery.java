@@ -57,7 +57,8 @@ public class SrndTruncQuery extends SimpleTerm {
   @Override
   public void visitMatchingTerms(IndexReader reader, String fieldName, MatchingTermVisitor mtv)
       throws IOException {
-    Map<BytesRef, TermStates> termStatesMap = collectTerms(reader, fieldName, compiled::getTermsEnum);
+    Map<BytesRef, TermStates> termStatesMap =
+        collectTerms(reader, fieldName, compiled::getTermsEnum);
     for (Map.Entry<BytesRef, TermStates> e : termStatesMap.entrySet()) {
       mtv.visitMatchingTerm(new Term(fieldName, e.getKey()), e.getValue());
     }

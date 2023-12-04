@@ -68,7 +68,8 @@ public class SrndTermQuery extends SimpleTerm {
       if (termsEnum == TermsEnum.EMPTY) continue;
 
       if (termsEnum.seekCeil(seekTerm) == TermsEnum.SeekStatus.FOUND) {
-        ts.register(termsEnum.termState(), context.ord, termsEnum.docFreq(), termsEnum.totalTermFreq());
+        ts.register(
+            termsEnum.termState(), context.ord, termsEnum.docFreq(), termsEnum.totalTermFreq());
       }
     }
     if (ts.docFreq() > 0) {

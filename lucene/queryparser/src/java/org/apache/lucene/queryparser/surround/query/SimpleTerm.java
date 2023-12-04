@@ -73,7 +73,10 @@ public abstract class SimpleTerm extends SrndQuery implements DistanceSubQuery {
   public abstract void visitMatchingTerms(
       IndexReader reader, String fieldName, MatchingTermVisitor mtv) throws IOException;
 
-  /** Callback to visit each matching term during "rewrite" in {@link #visitMatchingTerm(Term, TermStates)} */
+  /**
+   * Callback to visit each matching term during "rewrite" in {@link #visitMatchingTerm(Term,
+   * TermStates)}
+   */
   public interface MatchingTermVisitor {
     void visitMatchingTerm(Term t, TermStates termStates) throws IOException;
   }
@@ -101,7 +104,8 @@ public abstract class SimpleTerm extends SrndQuery implements DistanceSubQuery {
     return new SimpleTermRewriteQuery(this, fieldName, qf);
   }
 
-  protected final Map<BytesRef, TermStates> collectTerms(IndexReader reader, String field, IOFunction<Terms, TermsEnum> teFunc) throws IOException {
+  protected final Map<BytesRef, TermStates> collectTerms(
+      IndexReader reader, String field, IOFunction<Terms, TermsEnum> teFunc) throws IOException {
     Map<BytesRef, TermStates> ret = new HashMap<>();
     IndexReaderContext topReaderContext = reader.getContext();
     for (LeafReaderContext context : topReaderContext.leaves()) {
@@ -122,14 +126,18 @@ public abstract class SimpleTerm extends SrndQuery implements DistanceSubQuery {
         scratch.bytes = bytes.bytes;
         scratch.offset = bytes.offset;
         scratch.length = bytes.length;
-        TermStates ts = ret.computeIfAbsent(scratch, (k) -> {
-          k.bytes = ArrayUtil.copyOfSubArray(k.bytes, k.offset, k.length);
-          return new TermStates(topReaderContext);
-        });
+        TermStates ts =
+            ret.computeIfAbsent(
+                scratch,
+                (k) -> {
+                  k.bytes = ArrayUtil.copyOfSubArray(k.bytes, k.offset, k.length);
+                  return new TermStates(topReaderContext);
+                });
         if (scratch.bytes != bytes.bytes) {
           scratch = new BytesRef();
         }
-        ts.register(termsEnum.termState(), context.ord, termsEnum.docFreq(), termsEnum.totalTermFreq());
+        ts.register(
+            termsEnum.termState(), context.ord, termsEnum.docFreq(), termsEnum.totalTermFreq());
       }
     }
     return ret;

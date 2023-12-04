@@ -44,7 +44,6 @@ import org.apache.lucene.index.SegmentReadState;
 import org.apache.lucene.index.SegmentWriteState;
 import org.apache.lucene.index.Terms;
 import org.apache.lucene.util.CollectionUtil;
-import org.apache.lucene.util.IOFunction;
 import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.MergedIterator;
 
@@ -338,7 +337,9 @@ public abstract class PerFieldPostingsFormat extends PostingsFormat {
               if (!formats.containsKey(segmentSuffix)) {
                 formats.put(
                     segmentSuffix,
-                    wrap.wrap(format, format.fieldsProducer(new SegmentReadState(readState, segmentSuffix))));
+                    wrap.wrap(
+                        format,
+                        format.fieldsProducer(new SegmentReadState(readState, segmentSuffix))));
               }
               fields.put(fieldName, formats.get(segmentSuffix));
             }

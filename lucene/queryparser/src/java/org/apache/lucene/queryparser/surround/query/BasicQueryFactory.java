@@ -75,7 +75,8 @@ public class BasicQueryFactory {
     return new TermQuery(term, termStates);
   }
 
-  public SpanTermQuery newSpanTermQuery(Term term, TermStates termStates) throws TooManyBasicQueries {
+  public SpanTermQuery newSpanTermQuery(Term term, TermStates termStates)
+      throws TooManyBasicQueries {
     checkMax();
     return new SpanTermQuery(term, termStates);
   }
