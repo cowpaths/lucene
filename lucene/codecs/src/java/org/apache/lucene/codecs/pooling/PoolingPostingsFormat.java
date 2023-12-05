@@ -364,11 +364,6 @@ public class PoolingPostingsFormat extends PostingsFormat {
     PostingsEnum postingsEnum;
     final int flags;
     final boolean positionRequested;
-    private final boolean offsetsRequested;
-    private final boolean payloadsRequested;
-    private int startOffset = -1;
-    private int endOffset = -1;
-    private BytesRef payload;
 
     int docId;
     int freq;
@@ -389,14 +384,12 @@ public class PoolingPostingsFormat extends PostingsFormat {
       this.postingsEnum = postingsEnum;
       this.flags = flags;
       this.positionRequested = PostingsEnum.featureRequested(flags, POSITIONS);
-      this.offsetsRequested = PostingsEnum.featureRequested(flags, OFFSETS);
-      this.payloadsRequested = PostingsEnum.featureRequested(flags, PAYLOADS);
       this.pullPostings = pullPostings;
       this.docId = postingsEnum.docID();
       this.freq = postingsEnum.freq();
       this.positionsRemaining = this.freq;
       if (positionRequested) {
-        currentPositionAndAdvance(postingsEnum);
+        trackedPosition = postingsEnum.nextPosition();
       }
       this.cost = postingsEnum.cost();
     }
@@ -423,22 +416,33 @@ public class PoolingPostingsFormat extends PostingsFormat {
 
     @Override
     public int nextPosition() throws IOException {
-      return currentPositionAndAdvance(getPostingsEnum());
+      assert positionRequested;
+      int remaining = positionsRemaining--;
+      if (remaining == freq) {
+        return trackedPosition;
+      } else if (remaining > 0) {
+        return trackedPosition = getPostingsEnum().nextPosition();
+      } else {
+        return trackedPosition = Integer.MAX_VALUE;
+      }
     }
 
     @Override
     public int startOffset() throws IOException {
-      return startOffset;
+      assert positionsRemaining < freq;
+      return getPostingsEnum().startOffset();
     }
 
     @Override
     public int endOffset() throws IOException {
-      return endOffset;
+      assert positionsRemaining < freq;
+      return getPostingsEnum().endOffset();
     }
 
     @Override
     public BytesRef getPayload() throws IOException {
-      return payload;
+      assert positionsRemaining < freq;
+      return getPostingsEnum().getPayload();
     }
 
     @Override
@@ -475,7 +479,7 @@ public class PoolingPostingsFormat extends PostingsFormat {
       if (positionRequested && docId != DocIdSetIterator.NO_MORE_DOCS) {
         freq = pe.freq();
         positionsRemaining = freq;
-        currentPositionAndAdvance(pe);
+        trackedPosition = pe.nextPosition();
       }
       return this.docId = docId;
     }
@@ -501,46 +505,14 @@ public class PoolingPostingsFormat extends PostingsFormat {
       } else if (positionRequested) {
         assert pe.freq() == freq;
         int preAdvanceCount = freq - positionsRemaining;
-        if (preAdvanceCount > 0) {
+        if (preAdvanceCount > 1) {
           for (int i = preAdvanceCount - 1; i > 0; i--) {
             pe.nextPosition();
           }
-          if (offsetsRequested) {
-            startOffset = pe.startOffset();
-            endOffset = pe.endOffset();
-          }
-          if (payloadsRequested) {
-            BytesRef payload = pe.getPayload();
-            this.payload = payload == null ? null : BytesRef.deepCopyOf(payload);
-          }
-          int atPosition = pe.nextPosition();
-          assert atPosition == trackedPosition : "nope2 " + atPosition + " != " + trackedPosition;
         }
+        int atPosition = pe.nextPosition();
+        assert atPosition == trackedPosition : "nope2 " + atPosition + " != " + trackedPosition;
       }
-    }
-
-    int currentPositionAndAdvance(PostingsEnum pe) throws IOException {
-      if (!positionRequested) {
-        throw new UnsupportedOperationException();
-      }
-
-      int result = trackedPosition;
-      if (result != -1) {
-        if (offsetsRequested) {
-          startOffset = pe.startOffset();
-          endOffset = pe.endOffset();
-        }
-        if (payloadsRequested) {
-          BytesRef payload = pe.getPayload();
-          this.payload = payload == null ? null : BytesRef.deepCopyOf(payload);
-        }
-      }
-      if (positionsRemaining-- <= 0) {
-        trackedPosition = Integer.MAX_VALUE;
-      } else {
-        trackedPosition = pe.nextPosition();
-      }
-      return result;
     }
   }
 }
