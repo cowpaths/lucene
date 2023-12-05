@@ -165,7 +165,7 @@ public class PoolingPostingsFormat extends PostingsFormat {
     @Override
     public TermsEnum intersect(CompiledAutomaton compiled, BytesRef startTerm) throws IOException {
       return new FilteredTermsEnum(in.intersect(compiled, startTerm)) {
-        private final PostingsManager lookup = new PostingsManager(postingsLimit);
+        private final PostingsManager lookup = new PostingsManager(postingsLimit, in.iterator());
 
         @Override
         public BytesRef next() throws IOException {
@@ -195,7 +195,7 @@ public class PoolingPostingsFormat extends PostingsFormat {
      * applicable
      */
     PostingsEnum transferPostingsEnum(
-        TermsEnum raw, TermState ts, BytesRef term, ThinPostingsEnum dest, int docId, int flags)
+        TermState ts, BytesRef term, ThinPostingsEnum dest, int docId, int flags)
         throws IOException;
   }
 
@@ -305,7 +305,7 @@ public class PoolingPostingsFormat extends PostingsFormat {
     private PostingsEnum scratch;
     private final PostingsPuller puller;
 
-    private PostingsManager(int postingsLimit) {
+    private PostingsManager(int postingsLimit, TermsEnum common) {
       reuseQueue =
           new PriorityQueue<ThinPostingsEnum>(postingsLimit) {
             @Override
@@ -315,10 +315,10 @@ public class PoolingPostingsFormat extends PostingsFormat {
             }
           };
       this.puller =
-          (raw, termState, term, dest, targetDocId, flags) -> {
-            raw.seekExact(term, termState);
+          (termState, term, dest, targetDocId, flags) -> {
+            common.seekExact(term, termState);
             ThinPostingsEnum top = reuseQueue.top();
-            PostingsEnum ret = raw.postings(top.postingsEnum, flags);
+            PostingsEnum ret = common.postings(top.postingsEnum, flags);
             top.postingsEnum = null;
             dest.setPostingsEnum(ret, targetDocId);
             reuseQueue.updateTop(dest);
@@ -338,7 +338,7 @@ public class PoolingPostingsFormat extends PostingsFormat {
       PostingsEnum pe = te.postings(scratch, flags);
       int initialDoc = pe.nextDoc();
       assert initialDoc != PostingsEnum.NO_MORE_DOCS;
-      ThinPostingsEnum ret = new ThinPostingsEnum(te, ts, term, pe, flags, puller);
+      ThinPostingsEnum ret = new ThinPostingsEnum(ts, term, pe, flags, puller);
       ThinPostingsEnum removed = reuseQueue.insertWithOverflow(ret);
       if (removed == null) {
         scratch = null;
@@ -355,8 +355,6 @@ public class PoolingPostingsFormat extends PostingsFormat {
    * by the {@link PostingsPuller}.
    */
   private static class ThinPostingsEnum extends PostingsEnum {
-    private final TermsEnum raw;
-
     // the index to look up the TermState for fast seeking on the raw {@code TermsEnum}, this index
     // refers to the value
     // returned by the {@code PostingsManager#add} method
@@ -380,14 +378,12 @@ public class PoolingPostingsFormat extends PostingsFormat {
     boolean initialPeekDoc = true;
 
     private ThinPostingsEnum(
-        TermsEnum raw,
         TermState ts,
         BytesRef term,
         PostingsEnum postingsEnum,
         int flags,
         PostingsPuller pullPostings)
         throws IOException {
-      this.raw = raw;
       this.termState = ts;
       this.term = term;
       this.postingsEnum = postingsEnum;
@@ -413,7 +409,7 @@ public class PoolingPostingsFormat extends PostingsFormat {
       }
       if (postingsEnum == null) {
         // pull the PostingsEnum back. this.docId + 1 to advance to docId >= such id
-        pullPostings.transferPostingsEnum(raw, termState, term, this, this.docId + 1, flags);
+        pullPostings.transferPostingsEnum(termState, term, this, this.docId + 1, flags);
         return this.docId;
       } else {
         return initDoc(postingsEnum, postingsEnum.nextDoc());
@@ -459,7 +455,7 @@ public class PoolingPostingsFormat extends PostingsFormat {
         }
       }
       if (postingsEnum == null) {
-        pullPostings.transferPostingsEnum(raw, termState, term, this, target, flags);
+        pullPostings.transferPostingsEnum(termState, term, this, target, flags);
         return this.docId;
       } else {
         return initDoc(postingsEnum, postingsEnum.advance(target));
@@ -488,7 +484,7 @@ public class PoolingPostingsFormat extends PostingsFormat {
       if (postingsEnum == null) {
         int targetDocId = docId;
         PostingsEnum ret =
-            pullPostings.transferPostingsEnum(raw, termState, term, this, targetDocId, flags);
+            pullPostings.transferPostingsEnum(termState, term, this, targetDocId, flags);
         assert docId == targetDocId : "nope1 " + docId + " != " + targetDocId;
         return ret;
       } else {
