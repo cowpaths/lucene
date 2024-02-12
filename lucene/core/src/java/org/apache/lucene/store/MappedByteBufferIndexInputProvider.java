@@ -37,7 +37,7 @@ import org.apache.lucene.store.ByteBufferGuard.BufferCleaner;
 import org.apache.lucene.util.Constants;
 import org.apache.lucene.util.SuppressForbidden;
 
-final class MappedByteBufferIndexInputProvider implements MMapDirectory.MMapIndexInputProvider {
+public final class MappedByteBufferIndexInputProvider implements MMapDirectory.MMapIndexInputProvider {
 
   private static final Logger LOG =
       Logger.getLogger(MappedByteBufferIndexInputProvider.class.getName());
@@ -150,7 +150,7 @@ final class MappedByteBufferIndexInputProvider implements MMapDirectory.MMapInde
   }
 
   @SuppressForbidden(reason = "Needs access to sun.misc.Unsafe to enable hack")
-  private static Object unmapHackImpl() {
+  public static Object unmapHackImpl() {
     if (checkUnmapHackSysprop() == false) {
       return "Unmapping was disabled by system property "
           + MMapDirectory.ENABLE_UNMAP_HACK_SYSPROP
