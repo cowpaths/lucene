@@ -34,6 +34,12 @@ import java.nio.LongBuffer;
  */
 public final class ByteBufferGuard {
 
+  public ByteBuffer putBytes(ByteBuffer receiver, ByteBuffer supplier) {
+    ensureValid();
+    receiver.put(supplier);
+    return receiver;
+  }
+
   /**
    * Pass in an implementation of this interface to cleanup ByteBuffers. MMapDirectory implements
    * this to allow unmapping of bytebuffers with private Java APIs.
