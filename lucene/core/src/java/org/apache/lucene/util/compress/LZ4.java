@@ -72,7 +72,7 @@ public final class LZ4 {
    * provide {@link #DEFAULT_EXTENDED_MAX_DISTANCE} to allow tests to be run exercising lz4 with
    * {@link #EXTENDED_MAX_DISTANCE}.
    */
-  public static final boolean DEFAULT_EXTENDED_MAX_DISTANCE = true;
+  public static final boolean DEFAULT_EXTENDED_MAX_DISTANCE = false;
 
   static final int MEMORY_USAGE = 14;
   static final int MIN_MATCH = 4; // minimum length of a match
