@@ -569,9 +569,10 @@ public final class LZ4 {
       throws IOException {
     Objects.checkFromIndexSize(dictOff, dictLen, bytes.length);
     Objects.checkFromIndexSize(dictOff + dictLen, len, bytes.length);
-    if (dictLen > MAX_DISTANCE) {
+    final int maxDistance = ext ? EXTENDED_MAX_DISTANCE : MAX_DISTANCE;
+    if (dictLen > maxDistance) {
       throw new IllegalArgumentException(
-          "dictLen must not be greater than 64kB, but got " + dictLen);
+          "dictLen must not be greater than " + (ext ? "256k" : "64k") + ", but got " + dictLen);
     }
 
     final int end = dictOff + dictLen + len;
@@ -607,7 +608,7 @@ public final class LZ4 {
         int matchLen = MIN_MATCH + commonBytes(bytes, ref + MIN_MATCH, off + MIN_MATCH, limit);
 
         // try to find a better match
-        for (int r = ht.previous(ref), min = Math.max(off - MAX_DISTANCE + 1, dictOff);
+        for (int r = ht.previous(ref), min = Math.max(off - maxDistance + 1, dictOff);
             r >= min;
             r = ht.previous(r)) {
           assert readInt(bytes, r) == readInt(bytes, off);
