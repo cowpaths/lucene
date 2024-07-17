@@ -76,6 +76,41 @@ public abstract class LZ4TestCase extends LuceneTestCase {
     doTest(copy, offset, data.length, hashTable);
   }
 
+  private static int readVInt(byte[] compressed, int off, int[] size) throws IOException {
+    byte b = compressed[off++];
+    if (b >= 0) {
+      size[0] = 1;
+      return b;
+    }
+    int i = b & 0x7F;
+    b = compressed[off++];
+    i |= (b & 0x7F) << 7;
+    if (b >= 0) {
+      size[0] = 2;
+      return i;
+    }
+    b = compressed[off++];
+    i |= (b & 0x7F) << 14;
+    if (b >= 0) {
+      size[0] = 3;
+      return i;
+    }
+    b = compressed[off++];
+    i |= (b & 0x7F) << 21;
+    if (b >= 0) {
+      size[0] = 4;
+      return i;
+    }
+    b = compressed[off];
+    // Warning: the next ands use 0x0F / 0xF0 - beware copy/paste errors:
+    i |= (b & 0x0F) << 28;
+    if ((b & 0xF0) == 0) {
+      size[0] = 5;
+      return i;
+    }
+    throw new IOException("Invalid vInt detected (too many bits)");
+  }
+
   private void doTest(byte[] data, int offset, int length, LZ4.HashTable hashTable)
       throws IOException {
     ByteBuffersDataOutput out = new ByteBuffersDataOutput();
@@ -84,6 +119,7 @@ public abstract class LZ4TestCase extends LuceneTestCase {
 
     int off = 0;
     int decompressedOff = 0;
+    final int[] vintSize = LZ4.DEFAULT_EXTENDED_MAX_DISTANCE ? new int[1] : null;
     for (; ; ) {
       final int token = compressed[off++] & 0xFF;
       int literalLen = token >>> 4;
@@ -108,7 +144,13 @@ public abstract class LZ4TestCase extends LuceneTestCase {
         break;
       }
 
-      final int matchDec = (compressed[off++] & 0xFF) | ((compressed[off++] & 0xFF) << 8);
+      final int matchDec;
+      if (LZ4.DEFAULT_EXTENDED_MAX_DISTANCE) {
+        matchDec = readVInt(compressed, off, vintSize);
+        off += vintSize[0];
+      } else {
+        matchDec = (compressed[off++] & 0xFF) | ((compressed[off++] & 0xFF) << 8);
+      }
       // check that match dec is not 0
       assertTrue(matchDec + " " + decompressedOff, matchDec > 0 && matchDec <= decompressedOff);
 

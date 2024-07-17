@@ -53,6 +53,27 @@ public final class LZ4 {
    */
   public static final int MAX_DISTANCE = 1 << 16; // maximum distance of a reference
 
+  /**
+   * Longer lookback window size. Cf. {@link #MAX_DISTANCE}. This allows the context window to be
+   * 256k instead of the default 64k, and can provide substantial compression ratio and performance
+   * boost for data where the repetition period is longer.
+   */
+  public static final int EXTENDED_MAX_DISTANCE = (1 << 18) - 1;
+
+  /**
+   * There are some use cases (e.g., 256k block-level compression applied over index files) where
+   * the period of pattern repetition is longer. Such cases benefit from a combination of {@link
+   * HighCompressionHashTable} and a longer lookback window ({@link #EXTENDED_MAX_DISTANCE} instead
+   * of {@link #MAX_DISTANCE}). The benefits are both in compression (real-world cases with ~3x
+   * improved compression!), but also in latency/CPU-efficiency, in some cases with &gt;2x faster
+   * execution.
+   *
+   * <p>We want to support lz4 with {@link #EXTENDED_MAX_DISTANCE} for these special cases, but also
+   * provide {@link #DEFAULT_EXTENDED_MAX_DISTANCE} to allow tests to be run exercising lz4 with
+   * {@link #EXTENDED_MAX_DISTANCE}.
+   */
+  public static final boolean DEFAULT_EXTENDED_MAX_DISTANCE = false;
+
   static final int MEMORY_USAGE = 14;
   static final int MIN_MATCH = 4; // minimum length of a match
   static final int LAST_LITERALS = 5; // the last 5 bytes must be encoded as literals
@@ -88,6 +109,12 @@ public final class LZ4 {
    */
   public static int decompress(DataInput compressed, int decompressedLen, byte[] dest, int dOff)
       throws IOException {
+    return decompress(compressed, decompressedLen, dest, dOff, DEFAULT_EXTENDED_MAX_DISTANCE);
+  }
+
+  public static int decompress(
+      DataInput compressed, int decompressedLen, byte[] dest, int dOff, boolean ext)
+      throws IOException {
     final int destEnd = dOff + decompressedLen;
 
     do {
@@ -112,7 +139,7 @@ public final class LZ4 {
       }
 
       // matchs
-      final int matchDec = compressed.readShort() & 0xFFFF;
+      final int matchDec = ext ? compressed.readVInt() : (compressed.readShort() & 0xFFFF);
       assert matchDec > 0;
 
       int matchLen = token & 0x0F;
@@ -170,7 +197,13 @@ public final class LZ4 {
   }
 
   private static void encodeSequence(
-      byte[] bytes, int anchor, int matchRef, int matchOff, int matchLen, DataOutput out)
+      byte[] bytes,
+      int anchor,
+      int matchRef,
+      int matchOff,
+      int matchLen,
+      DataOutput out,
+      boolean ext)
       throws IOException {
     final int literalLen = matchOff - anchor;
     assert matchLen >= 4;
@@ -180,8 +213,12 @@ public final class LZ4 {
 
     // encode match dec
     final int matchDec = matchOff - matchRef;
-    assert matchDec > 0 && matchDec < 1 << 16;
-    out.writeShort((short) matchDec);
+    assert matchDec > 0 && matchDec < (ext ? EXTENDED_MAX_DISTANCE : MAX_DISTANCE);
+    if (ext) {
+      out.writeVInt(matchDec);
+    } else {
+      out.writeShort((short) matchDec);
+    }
 
     // encode match len
     if (matchLen >= MIN_MATCH + 0x0F) {
@@ -524,11 +561,18 @@ public final class LZ4 {
   public static void compressWithDictionary(
       byte[] bytes, int dictOff, int dictLen, int len, DataOutput out, HashTable ht)
       throws IOException {
+    compressWithDictionary(bytes, dictOff, dictLen, len, out, ht, DEFAULT_EXTENDED_MAX_DISTANCE);
+  }
+
+  public static void compressWithDictionary(
+      byte[] bytes, int dictOff, int dictLen, int len, DataOutput out, HashTable ht, boolean ext)
+      throws IOException {
     Objects.checkFromIndexSize(dictOff, dictLen, bytes.length);
     Objects.checkFromIndexSize(dictOff + dictLen, len, bytes.length);
-    if (dictLen > MAX_DISTANCE) {
+    final int maxDistance = ext ? EXTENDED_MAX_DISTANCE : MAX_DISTANCE;
+    if (dictLen > maxDistance) {
       throw new IllegalArgumentException(
-          "dictLen must not be greater than 64kB, but got " + dictLen);
+          "dictLen must not be greater than " + (ext ? "256k" : "64k") + ", but got " + dictLen);
     }
 
     final int end = dictOff + dictLen + len;
@@ -564,7 +608,7 @@ public final class LZ4 {
         int matchLen = MIN_MATCH + commonBytes(bytes, ref + MIN_MATCH, off + MIN_MATCH, limit);
 
         // try to find a better match
-        for (int r = ht.previous(ref), min = Math.max(off - MAX_DISTANCE + 1, dictOff);
+        for (int r = ht.previous(ref), min = Math.max(off - maxDistance + 1, dictOff);
             r >= min;
             r = ht.previous(r)) {
           assert readInt(bytes, r) == readInt(bytes, off);
@@ -575,7 +619,7 @@ public final class LZ4 {
           }
         }
 
-        encodeSequence(bytes, anchor, ref, off, matchLen, out);
+        encodeSequence(bytes, anchor, ref, off, matchLen, out, ext);
         off += matchLen;
         anchor = off;
       }
