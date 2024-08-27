@@ -182,22 +182,16 @@ public class FuzzySet implements Accountable {
   public void serialize(DataOutput out) throws IOException {
     out.writeVInt(hashCount);
     out.writeInt(bloomSize);
-    long[] bits = filter.getBits();
-    out.writeInt(bits.length);
-    for (int i = 0; i < bits.length; i++) {
-      // Can't used VLong encoding because cant cope with negative numbers
-      // output by FixedBitSet
-      out.writeLong(bits[i]);
-    }
+    filter.writeTo(out, true);
   }
 
   public static FuzzySet deserialize(DataInput in) throws IOException {
     int hashCount = in.readVInt();
     int bloomSize = in.readInt();
     int numLongs = in.readInt();
-    long[] longs = new long[numLongs];
+    FixedBitSet.BitsBuilder longs = new FixedBitSet.BitsBuilder(numLongs);
     for (int i = 0; i < numLongs; i++) {
-      longs[i] = in.readLong();
+      longs.set(i, in.readLong());
     }
     FixedBitSet bits = new FixedBitSet(longs, bloomSize + 1);
     return new FuzzySet(bits, bloomSize, hashCount);
@@ -296,7 +290,7 @@ public class FuzzySet implements Accountable {
 
   @Override
   public long ramBytesUsed() {
-    return RamUsageEstimator.sizeOf(filter.getBits());
+    return RamUsageEstimator.sizeOf(filter);
   }
 
   @Override
