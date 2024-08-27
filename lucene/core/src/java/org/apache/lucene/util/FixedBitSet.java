@@ -61,7 +61,7 @@ public final class FixedBitSet extends BitSet {
     // will guide the heap region sizing
     long maxMemory = Runtime.getRuntime().maxMemory();
     int exp = 64 - Long.numberOfLeadingZeros(maxMemory) - 1; // round down to nearest power of 2
-    int adjust = -1;
+    int adjust = 0;
     // `- 16` below to map exponent to corresponding `long[]` size
     WORDS_SHIFT = Math.min(17, Math.max(7, (exp - 16) + adjust)); // 1K <= MAX_BLOCK_SIZE <= 1M
     System.err.println("exp="+exp);
@@ -437,22 +437,23 @@ public final class FixedBitSet extends BitSet {
     return val;
   }
 
+  private static final long INVERSE_ONE = ~1L;
+
   @Override
   public void clear(int index) {
     assert index >= 0 && index < numBits : "index=" + index + ", numBits=" + numBits;
     int wordNum = index >> 6;
-    long bitmask = 1L << index;
-    bits[wordNum >> WORDS_SHIFT][wordNum & BLOCK_MASK] &= ~bitmask;
+    bits[wordNum >> WORDS_SHIFT][wordNum & BLOCK_MASK] &= (INVERSE_ONE << index);
   }
 
   public boolean getAndClear(int index) {
     assert index >= 0 && index < numBits : "index=" + index + ", numBits=" + numBits;
     int wordNum = index >> 6; // div 64
-    long bitmask = 1L << index;
+    long bitmask = INVERSE_ONE << index;
     int i = wordNum >> WORDS_SHIFT;
     int j = wordNum & BLOCK_MASK;
     boolean val = (bits[i][j] & bitmask) != 0;
-    bits[i][j] &= ~bitmask;
+    bits[i][j] &= bitmask;
     return val;
   }
 
