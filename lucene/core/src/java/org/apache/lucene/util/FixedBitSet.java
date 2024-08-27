@@ -465,18 +465,23 @@ public final class FixedBitSet extends BitSet {
   public int nextSetBit(int index) {
     // Depends on the ghost bits being clear!
     assert index >= 0 && index < numBits : "index=" + index + ", numBits=" + numBits;
-    int i = index >> 6;
-    long word = bits[i >> WORDS_SHIFT][i & BLOCK_MASK] >> index; // skip all the bits to the right of index
+    int from = index >> 6;
+    long word = bits[from >> WORDS_SHIFT][from & BLOCK_MASK] >> index; // skip all the bits to the right of index
 
     if (word != 0) {
       return index + Long.numberOfTrailingZeros(word);
     }
 
-    while (++i < numWords) {
-      word = bits[i >> WORDS_SHIFT][i & BLOCK_MASK];
-      if (word != 0) {
-        return (i << 6) + Long.numberOfTrailingZeros(word);
+    int innerInit = ++from & BLOCK_MASK;
+    for (int i = from >> WORDS_SHIFT, outerLim = ((numWords - 1) >> WORDS_SHIFT); i <= outerLim; i++) {
+      long[] a = bits[i];
+      for (int j = innerInit, lim = (i == outerLim ? ((numWords - 1) & BLOCK_MASK) : BLOCK_MASK); j <= lim; j++) {
+        word = a[j];
+        if (word != 0) {
+          return (((i << WORDS_SHIFT) | j) << 6) + Long.numberOfTrailingZeros(word);
+        }
       }
+      innerInit = 0;
     }
 
     return DocIdSetIterator.NO_MORE_DOCS;
