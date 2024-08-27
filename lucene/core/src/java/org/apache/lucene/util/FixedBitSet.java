@@ -61,8 +61,15 @@ public final class FixedBitSet extends BitSet {
     // will guide the heap region sizing
     long maxMemory = Runtime.getRuntime().maxMemory();
     int exp = 64 - Long.numberOfLeadingZeros(maxMemory) - 1; // round down to nearest power of 2
+    int adjust = -1;
     // `- 16` below to map exponent to corresponding `long[]` size
-    WORDS_SHIFT = Math.min(17, Math.max(7, exp - 16)); // 1K <= MAX_BLOCK_SIZE <= 1M
+    WORDS_SHIFT = Math.min(17, Math.max(7, (exp - 16) + adjust)); // 1K <= MAX_BLOCK_SIZE <= 1M
+    System.err.println("exp="+exp);
+    System.err.println("MEM="+(maxMemory >> 20)+"m, maxBlockSize="+(1 << WORDS_SHIFT)+" ("+(((1 << WORDS_SHIFT) * 8) >> 10)+"k) WORDS_SHIFT="+WORDS_SHIFT+" / "+RamUsageEstimator.humanReadableUnits(RamUsageEstimator.sizeOf(new long[1 << WORDS_SHIFT])));
+  }
+
+  public static void main(String[] args) {
+
   }
 
   private static final int MAX_BLOCK_SIZE = 1 << WORDS_SHIFT;
