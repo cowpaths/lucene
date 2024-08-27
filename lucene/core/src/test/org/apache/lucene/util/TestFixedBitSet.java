@@ -326,7 +326,7 @@ public class TestFixedBitSet extends BaseBitSetTestCase<FixedBitSet> {
     FixedBitSet bs;
     if (random().nextBoolean()) {
       int bits2words = FixedBitSet.bits2words(numBits);
-      long[] words = new long[bits2words + random().nextInt(100)];
+      FixedBitSet.BitsBuilder words = new FixedBitSet.BitsBuilder(bits2words + random().nextInt(100));
       bs = new FixedBitSet(words, numBits);
     } else {
       bs = new FixedBitSet(numBits);
@@ -383,8 +383,7 @@ public class TestFixedBitSet extends BaseBitSetTestCase<FixedBitSet> {
     assertTrue(newBits.get(1));
     assertTrue(newBits.get(4));
     newBits.clear(1);
-    // we align to 64-bits, so even though it shouldn't have, it re-allocated a long[1]
-    assertTrue(bits.get(1));
+    assertFalse(bits.get(1)); // single word; shared, since no need to re-allocate
     assertFalse(newBits.get(1));
 
     newBits.set(1);
