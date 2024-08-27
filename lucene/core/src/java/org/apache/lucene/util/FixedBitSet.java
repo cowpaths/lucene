@@ -871,9 +871,15 @@ public final class FixedBitSet extends BitSet {
   public int hashCode() {
     // Depends on the ghost bits being clear!
     long h = 0;
-    for (int i = numWords; --i >= 0; ) {
-      h ^= bits[i >> WORDS_SHIFT][i & BLOCK_MASK];
-      h = (h << 1) | (h >>> 63); // rotate left
+    int initInner = (numWords - 1) & BLOCK_MASK;
+
+    for (int i = (numWords - 1) >> WORDS_SHIFT; i >= 0; i--) {
+      long[] a = bits[i];
+      for (int j = initInner; j >= 0; j--) {
+        h ^= a[j];
+        h = (h << 1) | (h >>> 63); // rotate left
+      }
+      initInner = BLOCK_MASK;
     }
     // fold leftmost bits into right and add a constant to prevent
     // empty sets from returning 0, which is too common.
