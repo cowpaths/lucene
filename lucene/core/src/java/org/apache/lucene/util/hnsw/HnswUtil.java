@@ -21,6 +21,7 @@ import static org.apache.lucene.search.DocIdSetIterator.NO_MORE_DOCS;
 import java.io.IOException;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Deque;
 import java.util.List;
 import org.apache.lucene.codecs.hnsw.HnswGraphProvider;
@@ -189,21 +190,27 @@ public class HnswUtil {
 
   private static int nextClearBit(FixedBitSet bits, int index) {
     // Does not depend on the ghost bits being clear!
-    long[] barray = bits.getBits();
+    long[][] barray = bits.getBits();
     assert index >= 0 && index < bits.length() : "index=" + index + ", numBits=" + bits.length();
-    int i = index >> 6;
-    long word = ~(barray[i] >> index); // skip all the bits to the right of index
+    int from = index >> 6;
+    long word = ~(barray[from >> FixedBitSet.WORDS_SHIFT][from & FixedBitSet.BLOCK_MASK] >> index); // skip all the bits to the right of index
 
     int next = NO_MORE_DOCS;
     if (word != 0) {
       next = index + Long.numberOfTrailingZeros(word);
     } else {
-      while (++i < barray.length) {
-        word = ~barray[i];
-        if (word != 0) {
-          next = (i << 6) + Long.numberOfTrailingZeros(word);
-          break;
+      int limit = FixedBitSet.bits2words(bits.length());
+      int innerInit = ++from & FixedBitSet.BLOCK_MASK;
+      for (int i = from >> FixedBitSet.WORDS_SHIFT, outerLim = ((limit - 1) >> FixedBitSet.WORDS_SHIFT); i <= outerLim; i++) {
+        long[] a = barray[i];
+        for (int j = innerInit, lim = (i == outerLim ? ((limit - 1) & FixedBitSet.BLOCK_MASK) : FixedBitSet.BLOCK_MASK); j <= lim; j++) {
+          word = ~a[j];
+          if (word != 0) {
+            next = (((i << FixedBitSet.WORDS_SHIFT) | j) << 6) + Long.numberOfTrailingZeros(word);
+            break;
+          }
         }
+        innerInit = 0;
       }
     }
     if (next >= bits.length()) {
