@@ -313,12 +313,7 @@ public final class FixedBitSet extends BitSet {
     this.numBits = numBits;
     this.bits = storedBits.bits;
 
-    try {
-      assert verifyGhostBitsClear();
-    } catch (AssertionError er) {
-      System.err.println("oops "+numWords+", "+numBits+", "+bits.length+", "+Arrays.stream(bits).map((a) -> a.length).collect(Collectors.toList()));
-      throw er;
-    }
+    assert verifyGhostBitsClear();
   }
 
   @Override
