@@ -473,12 +473,7 @@ public final class FixedBitSet extends BitSet {
     }
 
     while (++i < numWords) {
-      try {
-        word = bits[i >> WORDS_SHIFT][i & BLOCK_MASK];
-      } catch (RuntimeException ex) {
-        System.err.println("whoa! "+i+", "+numWords+", "+Arrays.stream(bits).map((a) -> a.length).collect(Collectors.toList()));
-        throw ex;
-      }
+      word = bits[i >> WORDS_SHIFT][i & BLOCK_MASK];
       if (word != 0) {
         return (i << 6) + Long.numberOfTrailingZeros(word);
       }
