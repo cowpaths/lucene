@@ -687,7 +687,7 @@ public final class FixedBitSet extends BitSet {
     // Depends on the ghost bits being clear!
     if (numWords < 1) return true;
 
-    int initInner = numWords & BLOCK_MASK;
+    int initInner = (numWords - 1) & BLOCK_MASK;
 
     for (int i = (numWords - 1) >> WORDS_SHIFT; i >= 0; i--) {
       long[] a = bits[i];
