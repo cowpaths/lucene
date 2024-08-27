@@ -525,11 +525,32 @@ public final class FixedBitSet extends BitSet {
 
   /** this = this OR other */
   public void or(FixedBitSet other) {
-    or(0, other.bits, other.numWords);
+    or(other.bits, other.numWords);
   }
 
   private void or(final int otherOffsetWords, FixedBitSet other) {
-    or(otherOffsetWords, other.bits, other.numWords);
+    if (otherOffsetWords == 0) {
+      or(other.bits, other.numWords);
+    } else {
+      or(otherOffsetWords, other.bits, other.numWords);
+    }
+  }
+
+  private void or(final long[][] otherArr, final int otherNumWords) {
+    assert otherNumWords <= numWords
+        : "numWords=" + numWords + ", otherNumWords=" + otherNumWords;
+    int maxWord = Math.min(numWords, otherNumWords);
+    final long[][] thisArr = this.bits;
+    int initInner = (maxWord - 1) & BLOCK_MASK;
+
+    for (int i = (maxWord - 1) >> WORDS_SHIFT; i >= 0; i--) {
+      long[] a = thisArr[i];
+      long[] b = otherArr[i];
+      for (int j = initInner; j >= 0; j--) {
+        a[j] |= b[j];
+      }
+      initInner = BLOCK_MASK;
+    }
   }
 
   private void or(final int otherOffsetWords, final long[][] otherArr, final int otherNumWords) {
@@ -651,11 +672,30 @@ public final class FixedBitSet extends BitSet {
 
   /** this = this AND NOT other */
   public void andNot(FixedBitSet other) {
-    andNot(0, other.bits, other.numWords);
+    andNot(other.bits, other.numWords);
   }
 
   private void andNot(final int otherOffsetWords, FixedBitSet other) {
-    andNot(otherOffsetWords, other.bits, other.numWords);
+    if (otherOffsetWords == 0) {
+      andNot(other.bits, other.numWords);
+    } else {
+      andNot(otherOffsetWords, other.bits, other.numWords);
+    }
+  }
+
+  private void andNot(final long[][] otherArr, final int otherNumWords) {
+    int maxWord = Math.min(numWords, otherNumWords);
+    final long[][] thisArr = this.bits;
+    int initInner = (maxWord - 1) & BLOCK_MASK;
+
+    for (int i = (maxWord - 1) >> WORDS_SHIFT; i >= 0; i--) {
+      long[] a = thisArr[i];
+      long[] b = otherArr[i];
+      for (int j = initInner; j >= 0; j--) {
+        a[j] &= ~b[j];
+      }
+      initInner = BLOCK_MASK;
+    }
   }
 
   private void andNot(final int otherOffsetWords, final long[][] otherArr, final int otherNumWords) {
