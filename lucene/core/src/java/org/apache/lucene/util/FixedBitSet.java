@@ -490,19 +490,24 @@ public final class FixedBitSet extends BitSet {
   @Override
   public int prevSetBit(int index) {
     assert index >= 0 && index < numBits : "index=" + index + " numBits=" + numBits;
-    int i = index >> 6;
+    int from = index >> 6;
     final int subIndex = index & 0x3f; // index within the word
-    long word = (bits[i >> WORDS_SHIFT][i & BLOCK_MASK] << (63 - subIndex)); // skip all the bits to the left of index
+    long word = (bits[from >> WORDS_SHIFT][from & BLOCK_MASK] << (63 - subIndex)); // skip all the bits to the left of index
 
     if (word != 0) {
-      return (i << 6) + subIndex - Long.numberOfLeadingZeros(word); // See LUCENE-3197
+      return (from << 6) + subIndex - Long.numberOfLeadingZeros(word); // See LUCENE-3197
     }
 
-    while (--i >= 0) {
-      word = bits[i >> WORDS_SHIFT][i & BLOCK_MASK];
-      if (word != 0) {
-        return (i << 6) + 63 - Long.numberOfLeadingZeros(word);
+    int innerInit = --from & BLOCK_MASK;
+    for (int i = from >> WORDS_SHIFT; i >= 0; i--) {
+      long[] a = bits[i];
+      for (int j = innerInit; j >= 0; j--) {
+        word = a[j];
+        if (word != 0) {
+          return (((i << WORDS_SHIFT) | j) << 6) + 63 - Long.numberOfLeadingZeros(word);
+        }
       }
+      innerInit = BLOCK_MASK;
     }
 
     return -1;
