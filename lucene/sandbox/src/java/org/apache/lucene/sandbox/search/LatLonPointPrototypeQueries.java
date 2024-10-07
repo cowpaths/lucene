@@ -25,6 +25,7 @@ import org.apache.lucene.document.LatLonPoint;
 import org.apache.lucene.geo.GeoUtils;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.PointValues;
+import org.apache.lucene.internal.hppc.IntArrayList;
 import org.apache.lucene.search.FieldDoc;
 import org.apache.lucene.search.IndexSearcher;
 import org.apache.lucene.search.MatchAllDocsQuery;
@@ -89,7 +90,7 @@ public class LatLonPointPrototypeQueries {
       throw new IllegalArgumentException("searcher must not be null");
     }
     List<PointValues> readers = new ArrayList<>();
-    List<Integer> docBases = new ArrayList<>();
+    IntArrayList docBases = new IntArrayList();
     List<Bits> liveDocs = new ArrayList<>();
     int totalHits = 0;
     for (LeafReaderContext leaf : searcher.getIndexReader().leaves()) {

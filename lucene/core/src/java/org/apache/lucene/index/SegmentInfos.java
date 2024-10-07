@@ -118,17 +118,20 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
    * created.
    */
   public static final int VERSION_70 = 7;
+
   /** The version that updated segment name counter to be long instead of int. */
   public static final int VERSION_72 = 8;
+
   /** The version that recorded softDelCount */
   public static final int VERSION_74 = 9;
+
   /** The version that recorded SegmentCommitInfo IDs */
   public static final int VERSION_86 = 10;
 
   static final int VERSION_CURRENT = VERSION_86;
 
   /** Name of the generation reference file name */
-  private static final String OLD_SEGMENTS_GEN = "segments.gen";
+  static final String OLD_SEGMENTS_GEN = "segments.gen";
 
   /** Used to name new segments. */
   public long counter;
@@ -138,6 +141,7 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
 
   private long generation; // generation of the "segments_N" for the next commit
   private long lastGeneration; // generation of the "segments_N" file we last successfully read
+
   // or wrote; this is normally the same as generation except if
   // there was an IOException that had interrupted a commit
 
@@ -151,7 +155,7 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
    *
    * @see #setInfoStream
    */
-  private static PrintStream infoStream = null;
+  private static PrintStream infoStream;
 
   /** Id for this commit; only written starting with Lucene 5.0 */
   private byte[] id;
@@ -1019,6 +1023,7 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
   void replace(SegmentInfos other) {
     rollbackSegmentInfos(other.asList());
     lastGeneration = other.lastGeneration;
+    userData = other.userData;
   }
 
   /** Returns sum of all segment's maxDocs. Note that this does not include deletions */

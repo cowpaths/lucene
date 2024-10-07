@@ -102,6 +102,8 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import junit.framework.AssertionFailedError;
 import org.apache.lucene.analysis.Analyzer;
+import org.apache.lucene.codecs.KnnVectorsFormat;
+import org.apache.lucene.codecs.bitvectors.HnswBitVectorsFormat;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.Field.Store;
@@ -134,6 +136,7 @@ import org.apache.lucene.index.MergeScheduler;
 import org.apache.lucene.index.MultiBits;
 import org.apache.lucene.index.MultiDocValues;
 import org.apache.lucene.index.MultiTerms;
+import org.apache.lucene.index.NoDeletionPolicy;
 import org.apache.lucene.index.NumericDocValues;
 import org.apache.lucene.index.ParallelCompositeReader;
 import org.apache.lucene.index.ParallelLeafReader;
@@ -142,6 +145,7 @@ import org.apache.lucene.index.PostingsEnum;
 import org.apache.lucene.index.QueryTimeout;
 import org.apache.lucene.index.SerialMergeScheduler;
 import org.apache.lucene.index.SimpleMergedSegmentWarmer;
+import org.apache.lucene.index.SnapshotDeletionPolicy;
 import org.apache.lucene.index.SortedDocValues;
 import org.apache.lucene.index.SortedNumericDocValues;
 import org.apache.lucene.index.SortedSetDocValues;
@@ -151,6 +155,7 @@ import org.apache.lucene.index.Terms;
 import org.apache.lucene.index.TermsEnum;
 import org.apache.lucene.index.TermsEnum.SeekStatus;
 import org.apache.lucene.index.TieredMergePolicy;
+import org.apache.lucene.index.VectorEncoding;
 import org.apache.lucene.internal.tests.IndexPackageAccess;
 import org.apache.lucene.internal.tests.TestSecrets;
 import org.apache.lucene.search.DocIdSetIterator;
@@ -502,7 +507,12 @@ public abstract class LuceneTestCase extends Assert {
    * of iterations to scale your tests (for nightly builds).
    */
   public static final int RANDOM_MULTIPLIER =
-      systemPropertyAsInt("tests.multiplier", TEST_NIGHTLY ? 2 : 1);
+      systemPropertyAsInt("tests.multiplier", defaultRandomMultiplier());
+
+  /** Compute the default value of the random multiplier (based on {@link #TEST_NIGHTLY}). */
+  static int defaultRandomMultiplier() {
+    return TEST_NIGHTLY ? 2 : 1;
+  }
 
   /** Leave temporary files on disk, even on successful runs. */
   public static final boolean LEAVE_TEMPORARY;
@@ -513,8 +523,7 @@ public abstract class LuceneTestCase extends Assert {
         Arrays.asList(
             "tests.leaveTemporary" /* ANT tasks's (junit4) flag. */,
             "tests.leavetemporary" /* lowercase */,
-            "tests.leavetmpdir" /* default */,
-            "solr.test.leavetmpdir" /* Solr's legacy */)) {
+            "tests.leavetmpdir" /* default */)) {
       defaultValue |= systemPropertyAsBoolean(property, false);
     }
     LEAVE_TEMPORARY = defaultValue;
@@ -678,13 +687,7 @@ public abstract class LuceneTestCase extends Assert {
 
                     // We reset the default locale and timezone; these properties change as a
                     // side-effect
-                    "user.language",
-                    "user.timezone",
-
-                    // TODO: these should, ideally, be moved to Solr's base class.
-                    "solr.directoryFactory",
-                    "solr.solr.home",
-                    "solr.data.dir"))
+                    "user.language", "user.timezone"))
             .around(classEnvRule = new TestRuleSetupAndRestoreClassEnv());
   }
 
@@ -949,6 +952,13 @@ public abstract class LuceneTestCase extends Assert {
   public static void dumpArray(String label, Object[] objs, PrintStream stream) {
     Iterator<?> iter = (null == objs) ? null : Arrays.asList(objs).iterator();
     dumpIterator(label, iter, stream);
+  }
+
+  /** create a new index writer config with a snapshot deletion policy */
+  public static IndexWriterConfig newSnapshotIndexWriterConfig(Analyzer analyzer) {
+    IndexWriterConfig c = newIndexWriterConfig(analyzer);
+    c.setIndexDeletionPolicy(new SnapshotDeletionPolicy(NoDeletionPolicy.INSTANCE));
+    return c;
   }
 
   /** create a new index writer config with random defaults */
@@ -3273,5 +3283,23 @@ public abstract class LuceneTestCase extends Assert {
     }
 
     return it;
+  }
+
+  private static boolean supportsVectorEncoding(
+      KnnVectorsFormat format, VectorEncoding vectorEncoding) {
+    if (format instanceof HnswBitVectorsFormat) {
+      // special case, this only supports BYTE
+      return vectorEncoding == VectorEncoding.BYTE;
+    }
+    return true;
+  }
+
+  protected static KnnVectorsFormat randomVectorFormat(VectorEncoding vectorEncoding) {
+    KnnVectorsFormat[] availableFormats =
+        KnnVectorsFormat.availableKnnVectorsFormats().stream()
+            .map(KnnVectorsFormat::forName)
+            .filter(format -> supportsVectorEncoding(format, vectorEncoding))
+            .toArray(KnnVectorsFormat[]::new);
+    return RandomPicks.randomFrom(random(), availableFormats);
   }
 }

@@ -54,15 +54,17 @@ import org.apache.lucene.codecs.KnnVectorsFormat;
 import org.apache.lucene.codecs.PostingsFormat;
 import org.apache.lucene.codecs.blocktreeords.BlockTreeOrdsPostingsFormat;
 import org.apache.lucene.codecs.lucene90.Lucene90DocValuesFormat;
-import org.apache.lucene.codecs.lucene90.Lucene90PostingsFormat;
-import org.apache.lucene.codecs.lucene95.Lucene95Codec;
-import org.apache.lucene.codecs.lucene95.Lucene95HnswVectorsFormat;
+import org.apache.lucene.codecs.lucene99.Lucene99Codec;
+import org.apache.lucene.codecs.lucene99.Lucene99HnswVectorsFormat;
+import org.apache.lucene.codecs.lucene99.Lucene99PostingsFormat;
 import org.apache.lucene.codecs.perfield.PerFieldDocValuesFormat;
 import org.apache.lucene.codecs.perfield.PerFieldPostingsFormat;
 import org.apache.lucene.document.BinaryDocValuesField;
 import org.apache.lucene.document.BinaryPoint;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
+import org.apache.lucene.document.IntField;
+import org.apache.lucene.document.KeywordField;
 import org.apache.lucene.document.NumericDocValuesField;
 import org.apache.lucene.document.SortedDocValuesField;
 import org.apache.lucene.index.CheckIndex;
@@ -1236,7 +1238,7 @@ public final class TestUtil {
    * different than {@link Codec#getDefault()} because that is randomized.
    */
   public static Codec getDefaultCodec() {
-    return new Lucene95Codec();
+    return new Lucene99Codec();
   }
 
   /**
@@ -1244,7 +1246,7 @@ public final class TestUtil {
    * Lucene.
    */
   public static PostingsFormat getDefaultPostingsFormat() {
-    return new Lucene90PostingsFormat();
+    return new Lucene99PostingsFormat();
   }
 
   /**
@@ -1255,7 +1257,7 @@ public final class TestUtil {
    */
   public static PostingsFormat getDefaultPostingsFormat(
       int minItemsPerBlock, int maxItemsPerBlock) {
-    return new Lucene90PostingsFormat(minItemsPerBlock, maxItemsPerBlock);
+    return new Lucene99PostingsFormat(minItemsPerBlock, maxItemsPerBlock);
   }
 
   /** Returns a random postings format that supports term ordinals */
@@ -1322,7 +1324,7 @@ public final class TestUtil {
    * Lucene.
    */
   public static KnnVectorsFormat getDefaultKnnVectorsFormat() {
-    return new Lucene95HnswVectorsFormat();
+    return new Lucene99HnswVectorsFormat();
   }
 
   public static boolean anyFilesExceptWriteLock(Directory dir) throws IOException {
@@ -1425,7 +1427,19 @@ public final class TestUtil {
       final Field field2;
       final DocValuesType dvType = field1.fieldType().docValuesType();
       final int dimCount = field1.fieldType().pointDimensionCount();
-      if (dvType != DocValuesType.NONE) {
+      if (f instanceof KeywordField) {
+        field2 =
+            new KeywordField(
+                f.name(),
+                f.stringValue(),
+                f.fieldType().stored() ? Field.Store.YES : Field.Store.NO);
+      } else if (f instanceof IntField) {
+        field2 =
+            new IntField(
+                f.name(),
+                f.numericValue().intValue(),
+                f.fieldType().stored() ? Field.Store.YES : Field.Store.NO);
+      } else if (dvType != DocValuesType.NONE) {
         switch (dvType) {
           case NUMERIC:
             field2 = new NumericDocValuesField(field1.name(), field1.numericValue().longValue());

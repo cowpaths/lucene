@@ -207,6 +207,13 @@ public final class Version {
   @Deprecated public static final Version LUCENE_8_11_2 = new Version(8, 11, 2);
 
   /**
+   * Match settings and bugs in Lucene's 8.11.3 release.
+   *
+   * @deprecated Use latest
+   */
+  @Deprecated public static final Version LUCENE_8_11_3 = new Version(8, 11, 3);
+
+  /**
    * Match settings and bugs in Lucene's 8.12.0 release.
    *
    * @deprecated Use latest
@@ -274,11 +281,40 @@ public final class Version {
   @Deprecated public static final Version LUCENE_9_8_0 = new Version(9, 8, 0);
 
   /**
-   * Match settings and bugs in Lucene's 9.9.0 release.
+   * @deprecated (9.9.1) Use latest
+   */
+  @Deprecated public static final Version LUCENE_9_9_0 = new Version(9, 9, 0);
+
+  /**
+   * Match settings and bugs in Lucene's 9.9.1 release.
+   *
+   * @deprecated (9.9.2) Use latest
+   */
+  @Deprecated public static final Version LUCENE_9_9_1 = new Version(9, 9, 1);
+
+  /**
+   * Match settings and bugs in Lucene's 9.9.2 release.
+   *
+   * @deprecated (9.10.0) Use latest
+   */
+  @Deprecated public static final Version LUCENE_9_9_2 = new Version(9, 9, 2);
+
+  /**
+   * @deprecated (9.11.0) Use latest
+   */
+  @Deprecated public static final Version LUCENE_9_10_0 = new Version(9, 10, 0);
+
+  /**
+   * @deprecated (9.11.1) Use latest
+   */
+  @Deprecated public static final Version LUCENE_9_11_0 = new Version(9, 11, 0);
+
+  /**
+   * Match settings and bugs in Lucene's 9.11.1 release.
    *
    * <p>Use this to get the latest &amp; greatest settings, bug fixes, etc, for Lucene.
    */
-  public static final Version LUCENE_9_9_0 = new Version(9, 9, 0);
+  public static final Version LUCENE_9_11_1 = new Version(9, 11, 1);
 
   // To add a new version:
   //  * Only add above this comment
@@ -294,7 +330,7 @@ public final class Version {
    * <b>re-test your entire application</b> to ensure it behaves as expected, as some defaults may
    * have changed and may break functionality in your application.
    */
-  public static final Version LATEST = LUCENE_9_9_0;
+  public static final Version LATEST = LUCENE_9_11_1;
 
   /**
    * Constant for backwards compatibility.
@@ -467,10 +503,13 @@ public final class Version {
 
   /** Major version, the difference between stable and trunk */
   public final int major;
+
   /** Minor version, incremented within the stable branch */
   public final int minor;
+
   /** Bugfix number, incremented on release branches */
   public final int bugfix;
+
   /** Prerelease version, currently 0 (alpha), 1 (beta), or 2 (final) */
   public final int prerelease;
 

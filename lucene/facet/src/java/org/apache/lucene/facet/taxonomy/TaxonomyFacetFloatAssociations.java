@@ -93,7 +93,7 @@ public class TaxonomyFacetFloatAssociations extends FloatTaxonomyFacets {
       FacetsCollector fc,
       AssociationAggregationFunction aggregationFunction)
       throws IOException {
-    super(indexFieldName, taxoReader, aggregationFunction, config);
+    super(indexFieldName, taxoReader, aggregationFunction, config, fc);
     ordinalsReader = null;
     aggregateValues(aggregationFunction, fc.getMatchingDocs());
   }
@@ -110,7 +110,7 @@ public class TaxonomyFacetFloatAssociations extends FloatTaxonomyFacets {
       AssociationAggregationFunction aggregationFunction,
       DoubleValuesSource valuesSource)
       throws IOException {
-    super(indexFieldName, taxoReader, aggregationFunction, config);
+    super(indexFieldName, taxoReader, aggregationFunction, config, fc);
     ordinalsReader = null;
     aggregateValues(aggregationFunction, fc.getMatchingDocs(), fc.getKeepScores(), valuesSource);
   }
@@ -131,7 +131,7 @@ public class TaxonomyFacetFloatAssociations extends FloatTaxonomyFacets {
       AssociationAggregationFunction aggregationFunction,
       DoubleValuesSource valuesSource)
       throws IOException {
-    super(ordinalsReader.getIndexFieldName(), taxoReader, aggregationFunction, config);
+    super(ordinalsReader.getIndexFieldName(), taxoReader, aggregationFunction, config, fc);
     this.ordinalsReader = ordinalsReader;
     aggregateValues(aggregationFunction, fc.getMatchingDocs(), fc.getKeepScores(), valuesSource);
   }
@@ -166,6 +166,11 @@ public class TaxonomyFacetFloatAssociations extends FloatTaxonomyFacets {
       // If the user provided a custom ordinals reader, use it to retrieve the document ordinals:
       IntsRef scratch = new IntsRef();
       for (MatchingDocs hits : matchingDocs) {
+        if (hits.totalHits == 0) {
+          continue;
+        }
+        initializeValueCounters();
+
         OrdinalsSegmentReader ords = ordinalsReader.getReader(hits.context);
         DoubleValues scores = keepScores ? scores(hits) : null;
         DoubleValues functionValues = valueSource.getValues(hits.context, scores);
@@ -178,14 +183,21 @@ public class TaxonomyFacetFloatAssociations extends FloatTaxonomyFacets {
             float value = (float) functionValues.doubleValue();
             for (int i = 0; i < scratch.length; i++) {
               int ord = scratch.ints[i];
-              float newValue = aggregationFunction.aggregate(values[ord], value);
-              values[ord] = newValue;
+              float currentValue = getValue(ord);
+              float newValue = aggregationFunction.aggregate(currentValue, value);
+              setValue(ord, newValue);
+              setCount(ord, getCount(ord) + 1);
             }
           }
         }
       }
     } else {
       for (MatchingDocs hits : matchingDocs) {
+        if (hits.totalHits == 0) {
+          continue;
+        }
+        initializeValueCounters();
+
         SortedNumericDocValues ordinalValues =
             FacetUtils.loadOrdinalValues(hits.context.reader(), indexFieldName);
         if (ordinalValues == null) {
@@ -203,8 +215,10 @@ public class TaxonomyFacetFloatAssociations extends FloatTaxonomyFacets {
             int ordinalCount = ordinalValues.docValueCount();
             for (int i = 0; i < ordinalCount; i++) {
               int ord = (int) ordinalValues.nextValue();
-              float newValue = aggregationFunction.aggregate(values[ord], value);
-              values[ord] = newValue;
+              float currentValue = getValue(ord);
+              float newValue = aggregationFunction.aggregate(currentValue, value);
+              setValue(ord, newValue);
+              setCount(ord, getCount(ord) + 1);
             }
           }
         }
@@ -221,6 +235,11 @@ public class TaxonomyFacetFloatAssociations extends FloatTaxonomyFacets {
       throws IOException {
 
     for (MatchingDocs hits : matchingDocs) {
+      if (hits.totalHits == 0) {
+        continue;
+      }
+      initializeValueCounters();
+
       BinaryDocValues dv = DocValues.getBinary(hits.context.reader(), indexFieldName);
       DocIdSetIterator it =
           ConjunctionUtils.intersectIterators(Arrays.asList(hits.bits.iterator(), dv));
@@ -235,8 +254,10 @@ public class TaxonomyFacetFloatAssociations extends FloatTaxonomyFacets {
           offset += 4;
           float value = (float) BitUtil.VH_BE_FLOAT.get(bytes, offset);
           offset += 4;
-          float newValue = aggregationFunction.aggregate(values[ord], value);
-          values[ord] = newValue;
+          float currentValue = getValue(ord);
+          float newValue = aggregationFunction.aggregate(currentValue, value);
+          setValue(ord, newValue);
+          setCount(ord, getCount(ord) + 1);
         }
       }
     }

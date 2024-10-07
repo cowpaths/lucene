@@ -84,6 +84,10 @@ public final class ByteBufferGuard {
     }
   }
 
+  public boolean isInvalidated() {
+    return invalidated;
+  }
+
   private void ensureValid() {
     if (invalidated) {
       // this triggers an AlreadyClosedException in ByteBufferIndexInput:

@@ -16,6 +16,8 @@
  */
 package org.apache.lucene.store;
 
+import java.util.Objects;
+
 /**
  * IOContext holds additional details on the merge/search context. A IOContext object can never be
  * initialized as null as passed as a parameter to either {@link
@@ -45,23 +47,31 @@ public class IOContext {
   public final boolean readOnce;
 
   /**
+   * This flag indicates that the file will be accessed randomly. If this flag is set, then readOnce
+   * will be false.
+   */
+  public final boolean randomAccess;
+
+  /**
    * This flag is used for files that are a small fraction of the total index size and are expected
    * to be heavily accessed in random-access fashion. Some {@link Directory} implementations may
    * choose to load such files into physical memory (e.g. Java heap) as a way to provide stronger
-   * guarantees on query latency.
+   * guarantees on query latency. If this flag is set, then {@link #randomAccess} will be true.
    */
   public final boolean load;
 
   public static final IOContext DEFAULT = new IOContext(Context.DEFAULT);
 
-  public static final IOContext READONCE = new IOContext(true, false);
+  public static final IOContext READONCE = new IOContext(true, false, false);
 
-  public static final IOContext READ = new IOContext(false, false);
+  public static final IOContext READ = new IOContext(false, false, false);
 
-  public static final IOContext LOAD = new IOContext(false, true);
+  public static final IOContext LOAD = new IOContext(false, true, true);
+
+  public static final IOContext RANDOM = new IOContext(false, false, true);
 
   public IOContext() {
-    this(false, false);
+    this(false, false, false);
   }
 
   public IOContext(FlushInfo flushInfo) {
@@ -70,6 +80,7 @@ public class IOContext {
     this.mergeInfo = null;
     this.readOnce = false;
     this.load = false;
+    this.randomAccess = false;
     this.flushInfo = flushInfo;
   }
 
@@ -77,11 +88,18 @@ public class IOContext {
     this(context, null);
   }
 
-  private IOContext(boolean readOnce, boolean load) {
+  private IOContext(boolean readOnce, boolean load, boolean randomAccess) {
+    if (readOnce && randomAccess) {
+      throw new IllegalArgumentException("cannot be both readOnce and randomAccess");
+    }
+    if (load && randomAccess == false) {
+      throw new IllegalArgumentException("cannot be load but not randomAccess");
+    }
     this.context = Context.READ;
     this.mergeInfo = null;
     this.readOnce = readOnce;
     this.load = load;
+    this.randomAccess = randomAccess;
     this.flushInfo = null;
   }
 
@@ -96,13 +114,15 @@ public class IOContext {
     this.context = context;
     this.readOnce = false;
     this.load = false;
+    this.randomAccess = false;
     this.mergeInfo = mergeInfo;
     this.flushInfo = null;
   }
 
   /**
    * This constructor is used to initialize a {@link IOContext} instance with a new value for the
-   * readOnce variable.
+   * readOnce variable. This automatically sets {@link #randomAccess} and {@link #load} to {@code
+   * false}.
    *
    * @param ctxt {@link IOContext} object whose information is used to create the new instance
    *     except the readOnce variable.
@@ -113,18 +133,27 @@ public class IOContext {
     this.mergeInfo = ctxt.mergeInfo;
     this.flushInfo = ctxt.flushInfo;
     this.readOnce = readOnce;
+    this.randomAccess = false;
     this.load = false;
+  }
+
+  /**
+   * Return an updated {@link IOContext} that has {@link IOContext#randomAccess} set to true if
+   * {@link IOContext#context} is {@link Context#READ} or {@link Context#DEFAULT}. Otherwise, this
+   * returns this instance. This helps preserve sequential access for merging, which is always the
+   * right choice, while allowing {@link IndexInput}s open for searching to use random access.
+   */
+  public IOContext withRandomAccess() {
+    if (context == Context.READ || context == Context.DEFAULT) {
+      return RANDOM;
+    } else {
+      return this;
+    }
   }
 
   @Override
   public int hashCode() {
-    final int prime = 31;
-    int result = 1;
-    result = prime * result + ((context == null) ? 0 : context.hashCode());
-    result = prime * result + ((flushInfo == null) ? 0 : flushInfo.hashCode());
-    result = prime * result + ((mergeInfo == null) ? 0 : mergeInfo.hashCode());
-    result = prime * result + (readOnce ? 1231 : 1237);
-    return result;
+    return Objects.hash(context, flushInfo, mergeInfo, readOnce, load, randomAccess);
   }
 
   @Override
@@ -134,13 +163,11 @@ public class IOContext {
     if (getClass() != obj.getClass()) return false;
     IOContext other = (IOContext) obj;
     if (context != other.context) return false;
-    if (flushInfo == null) {
-      if (other.flushInfo != null) return false;
-    } else if (!flushInfo.equals(other.flushInfo)) return false;
-    if (mergeInfo == null) {
-      if (other.mergeInfo != null) return false;
-    } else if (!mergeInfo.equals(other.mergeInfo)) return false;
+    if (!Objects.equals(flushInfo, other.flushInfo)) return false;
+    if (!Objects.equals(mergeInfo, other.mergeInfo)) return false;
     if (readOnce != other.readOnce) return false;
+    if (load != other.load) return false;
+    if (randomAccess != other.randomAccess) return false;
     return true;
   }
 
@@ -154,6 +181,10 @@ public class IOContext {
         + flushInfo
         + ", readOnce="
         + readOnce
+        + ", load="
+        + load
+        + ", randomAccess="
+        + randomAccess
         + "]";
   }
 }

@@ -331,14 +331,35 @@ public final class ArrayUtil {
   }
 
   /**
+   * Returns an array whose size is at least {@code minLength}, generally over-allocating
+   * exponentially, but never allocating more than {@code maxLength} elements.
+   */
+  public static int[] growInRange(int[] array, int minLength, int maxLength) {
+    assert minLength >= 0
+        : "length must be positive (got " + minLength + "): likely integer overflow?";
+
+    if (minLength > maxLength) {
+      throw new IllegalArgumentException(
+          "requested minimum array length "
+              + minLength
+              + " is larger than requested maximum array length "
+              + maxLength);
+    }
+
+    if (array.length >= minLength) {
+      return array;
+    }
+
+    int potentialLength = oversize(minLength, Integer.BYTES);
+    return growExact(array, Math.min(maxLength, potentialLength));
+  }
+
+  /**
    * Returns an array whose size is at least {@code minSize}, generally over-allocating
    * exponentially
    */
   public static int[] grow(int[] array, int minSize) {
-    assert minSize >= 0 : "size must be positive (got " + minSize + "): likely integer overflow?";
-    if (array.length < minSize) {
-      return growExact(array, oversize(minSize, Integer.BYTES));
-    } else return array;
+    return growInRange(array, minSize, Integer.MAX_VALUE);
   }
 
   /**
@@ -602,6 +623,11 @@ public final class ArrayUtil {
     }.select(from, to, k);
   }
 
+  /** Copies an array into a new array. */
+  public static byte[] copyArray(byte[] array) {
+    return copyOfSubArray(array, 0, array.length);
+  }
+
   /**
    * Copies the specified range of the given array into a new sub array.
    *
@@ -613,6 +639,11 @@ public final class ArrayUtil {
     final byte[] copy = new byte[to - from];
     System.arraycopy(array, from, copy, 0, to - from);
     return copy;
+  }
+
+  /** Copies an array into a new array. */
+  public static char[] copyArray(char[] array) {
+    return copyOfSubArray(array, 0, array.length);
   }
 
   /**
@@ -628,6 +659,11 @@ public final class ArrayUtil {
     return copy;
   }
 
+  /** Copies an array into a new array. */
+  public static short[] copyArray(short[] array) {
+    return copyOfSubArray(array, 0, array.length);
+  }
+
   /**
    * Copies the specified range of the given array into a new sub array.
    *
@@ -639,6 +675,11 @@ public final class ArrayUtil {
     final short[] copy = new short[to - from];
     System.arraycopy(array, from, copy, 0, to - from);
     return copy;
+  }
+
+  /** Copies an array into a new array. */
+  public static int[] copyArray(int[] array) {
+    return copyOfSubArray(array, 0, array.length);
   }
 
   /**
@@ -654,6 +695,11 @@ public final class ArrayUtil {
     return copy;
   }
 
+  /** Copies an array into a new array. */
+  public static long[] copyArray(long[] array) {
+    return copyOfSubArray(array, 0, array.length);
+  }
+
   /**
    * Copies the specified range of the given array into a new sub array.
    *
@@ -665,6 +711,11 @@ public final class ArrayUtil {
     final long[] copy = new long[to - from];
     System.arraycopy(array, from, copy, 0, to - from);
     return copy;
+  }
+
+  /** Copies an array into a new array. */
+  public static float[] copyArray(float[] array) {
+    return copyOfSubArray(array, 0, array.length);
   }
 
   /**
@@ -680,6 +731,11 @@ public final class ArrayUtil {
     return copy;
   }
 
+  /** Copies an array into a new array. */
+  public static double[] copyArray(double[] array) {
+    return copyOfSubArray(array, 0, array.length);
+  }
+
   /**
    * Copies the specified range of the given array into a new sub array.
    *
@@ -691,6 +747,11 @@ public final class ArrayUtil {
     final double[] copy = new double[to - from];
     System.arraycopy(array, from, copy, 0, to - from);
     return copy;
+  }
+
+  /** Copies an array into a new array. */
+  public static <T> T[] copyArray(T[] array) {
+    return copyOfSubArray(array, 0, array.length);
   }
 
   /**
@@ -714,7 +775,7 @@ public final class ArrayUtil {
 
   /** Comparator for a fixed number of bytes. */
   @FunctionalInterface
-  public static interface ByteArrayComparator {
+  public interface ByteArrayComparator {
 
     /**
      * Compare bytes starting from the given offsets. The return value has the same contract as

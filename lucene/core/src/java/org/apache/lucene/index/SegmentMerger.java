@@ -18,6 +18,7 @@ package org.apache.lucene.index;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import org.apache.lucene.codecs.Codec;
 import org.apache.lucene.codecs.DocValuesConsumer;
@@ -56,13 +57,14 @@ final class SegmentMerger {
       InfoStream infoStream,
       Directory dir,
       FieldInfos.FieldNumbers fieldNumbers,
-      IOContext context)
+      IOContext context,
+      Executor intraMergeTaskExecutor)
       throws IOException {
     if (context.context != IOContext.Context.MERGE) {
       throw new IllegalArgumentException(
           "IOContext.context should be MERGE; got: " + context.context);
     }
-    mergeState = new MergeState(readers, segmentInfo, infoStream);
+    mergeState = new MergeState(readers, segmentInfo, infoStream, intraMergeTaskExecutor);
     directory = dir;
     this.codec = segmentInfo.getCodec();
     this.context = context;

@@ -136,14 +136,6 @@ public abstract class MergePolicy {
      */
     public void pauseNanos(long pauseNanos, PauseReason reason, BooleanSupplier condition)
         throws InterruptedException {
-      if (Thread.currentThread() != owner) {
-        throw new RuntimeException(
-            "Only the merge owner thread can call pauseNanos(). This thread: "
-                + Thread.currentThread().getName()
-                + ", owner thread: "
-                + owner);
-      }
-
       long start = System.nanoTime();
       AtomicLong timeUpdate = pauseTimesNS.get(reason);
       pauseLock.lock();
@@ -255,6 +247,15 @@ public abstract class MergePolicy {
       usesPooledReaders = false;
     }
 
+    /** Constructor for wrapping. */
+    protected OneMerge(OneMerge oneMerge) {
+      this.segments = oneMerge.segments;
+      this.mergeReaders = oneMerge.mergeReaders;
+      this.totalMaxDoc = oneMerge.totalMaxDoc;
+      this.mergeProgress = new OneMergeProgress();
+      this.usesPooledReaders = oneMerge.usesPooledReaders;
+    }
+
     /**
      * Called by {@link IndexWriter} after the merge started and from the thread that will be
      * executing the merge.
@@ -288,9 +289,30 @@ public abstract class MergePolicy {
       }
     }
 
-    /** Wrap the reader in order to add/remove information to the merged segment. */
+    /**
+     * Wrap a reader prior to merging in order to add/remove fields or documents.
+     *
+     * <p><b>NOTE:</b> It is illegal to reorder doc IDs here, use {@link
+     * #reorder(CodecReader,Directory)} instead.
+     */
     public CodecReader wrapForMerge(CodecReader reader) throws IOException {
       return reader;
+    }
+
+    /**
+     * Extend this method if you wish to renumber doc IDs. This method will be called when index
+     * sorting is disabled on a merged view of the {@link OneMerge}. A {@code null} return value
+     * indicates that doc IDs should not be reordered.
+     *
+     * <p><b>NOTE:</b> Returning a non-null value here disables several optimizations and increases
+     * the merging overhead.
+     *
+     * @param reader The reader to reorder.
+     * @param dir The {@link Directory} of the index, which may be used to create temporary files.
+     * @lucene.experimental
+     */
+    public Sorter.DocMap reorder(CodecReader reader, Directory dir) throws IOException {
+      return null;
     }
 
     /**
@@ -355,11 +377,7 @@ public abstract class MergePolicy {
      * not indicate the number of documents after the merge.
      */
     public int totalNumDocs() {
-      int total = 0;
-      for (SegmentCommitInfo info : segments) {
-        total += info.info.maxDoc();
-      }
-      return total;
+      return totalMaxDoc;
     }
 
     /** Return {@link MergeInfo} describing this merge. */
@@ -575,12 +593,12 @@ public abstract class MergePolicy {
    * If the size of the merge segment exceeds this ratio of the total index size then it will remain
    * in non-compound format
    */
-  protected double noCFSRatio = DEFAULT_NO_CFS_RATIO;
+  protected double noCFSRatio;
 
   /**
    * If the size of the merged segment exceeds this value then it will not use compound file format.
    */
-  protected long maxCFSSegmentSize = DEFAULT_MAX_CFS_SEGMENT_SIZE;
+  protected long maxCFSSegmentSize;
 
   /** Creates a new merge policy instance. */
   protected MergePolicy() {

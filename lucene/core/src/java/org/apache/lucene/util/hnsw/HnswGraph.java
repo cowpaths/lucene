@@ -20,11 +20,13 @@ package org.apache.lucene.util.hnsw;
 import static org.apache.lucene.search.DocIdSetIterator.NO_MORE_DOCS;
 
 import java.io.IOException;
-import java.util.Collection;
+import java.util.Arrays;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 import java.util.PrimitiveIterator;
 import org.apache.lucene.index.FloatVectorValues;
+import org.apache.lucene.internal.hppc.IntArrayList;
+import org.apache.lucene.internal.hppc.IntCursor;
 
 /**
  * Hierarchical Navigable Small World graph. Provides efficient approximate nearest neighbor search
@@ -65,6 +67,11 @@ public abstract class HnswGraph {
 
   /** Returns the number of nodes in the graph */
   public abstract int size();
+
+  /** Returns max node id, inclusive, normally this value will be size - 1 */
+  public int maxNodeId() {
+    return size() - 1;
+  }
 
   /**
    * Iterates over the neighbor list. It is illegal to call this method after it returns
@@ -145,6 +152,15 @@ public abstract class HnswGraph {
      * @return The number of integers written to `dest`
      */
     public abstract int consume(int[] dest);
+
+    public static int[] getSortedNodes(NodesIterator nodesOnLevel) {
+      int[] sortedNodes = new int[nodesOnLevel.size()];
+      for (int n = 0; nodesOnLevel.hasNext(); n++) {
+        sortedNodes[n] = nodesOnLevel.nextInt();
+      }
+      Arrays.sort(sortedNodes);
+      return sortedNodes;
+    }
   }
 
   /** NodesIterator that accepts nodes as an integer array. */
@@ -205,10 +221,10 @@ public abstract class HnswGraph {
 
   /** Nodes iterator based on set representation of nodes. */
   public static class CollectionNodesIterator extends NodesIterator {
-    Iterator<Integer> nodes;
+    Iterator<IntCursor> nodes;
 
     /** Constructor for iterator based on collection representing nodes */
-    public CollectionNodesIterator(Collection<Integer> nodes) {
+    public CollectionNodesIterator(IntArrayList nodes) {
       super(nodes.size());
       this.nodes = nodes.iterator();
     }
@@ -232,7 +248,7 @@ public abstract class HnswGraph {
       if (hasNext() == false) {
         throw new NoSuchElementException();
       }
-      return nodes.next();
+      return nodes.next().value;
     }
 
     @Override

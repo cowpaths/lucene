@@ -63,11 +63,12 @@ allprojects {
 allprojects {
   plugins.withType(JavaPlugin) {
     ext {
+      String randomVectorSize = RandomPicks.randomFrom(new Random(projectSeedLong), ["default", "128", "256", "512"])
       testOptions += [
           // seed, repetition and amplification.
           [propName: 'tests.seed', value: { -> rootSeed }, description: "Sets the master randomization seed."],
           [propName: 'tests.iters', value: null, description: "Duplicate (re-run) each test case N times."],
-          [propName: 'tests.multiplier', value: 1, description: "Value multiplier for randomized tests."],
+          [propName: 'tests.multiplier', value: null, description: "Value multiplier for randomized tests."],
           [propName: 'tests.maxfailures', value: null, description: "Skip tests after a given number of failures."],
           [propName: 'tests.timeoutSuite', value: null, description: "Timeout (in millis) for an entire suite."],
           [propName: 'tests.failfast', value: "false", description: "Stop the build early on failure.", buildOnly: true],
@@ -105,6 +106,15 @@ allprojects {
           // miscellaneous; some of them very weird.
           [propName: 'tests.LUCENE_VERSION', value: baseVersion, description: "Base Lucene version."],
           [propName: 'tests.bwcdir', value: null, description: "Data for backward-compatibility indexes."],
+          // vectorization related
+          [propName: 'tests.vectorsize',
+           value: { -> testsDefaultVectorizationRequested() ? 'default' : randomVectorSize },
+           description: "Sets preferred vector size in bits."],
+          [propName: 'tests.forceintegervectors',
+            value: { -> testsDefaultVectorizationRequested() ? false : (randomVectorSize != 'default') },
+            description: "Forces use of integer vectors even when slow."],
+          [propName: 'tests.defaultvectorization', value: false,
+            description: "Uses defaults for running tests with correct JVM settings to test Panama vectorization (tests.jvmargs, tests.vectorsize, tests.forceintegervectors)."],
       ]
     }
   }
@@ -138,7 +148,6 @@ allprojects {
          "tests.leaveTemporary",
          "tests.leavetemporary",
          "tests.leavetmpdir",
-         "solr.test.leavetmpdir",
       ].find { prop ->
         def v = Boolean.parseBoolean(propertyOrDefault(prop, "false"))
         if (v) {
@@ -155,6 +164,8 @@ allprojects {
         // and not the test JVM itself.
         systemProperties testOptionsResolved
 
+        jvmArgs Commandline.translateCommandline(testOptionsResolved['tests.jvmargs'])
+      
         if (Boolean.parseBoolean(testOptionsResolved['tests.asserts'])) {
           jvmArgs("-ea", "-esa")
         } else {

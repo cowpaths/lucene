@@ -18,8 +18,9 @@
 package org.apache.lucene.util.automaton;
 
 import java.util.Arrays;
-import org.apache.lucene.util.hppc.BitMixer;
-import org.apache.lucene.util.hppc.IntIntHashMap;
+import org.apache.lucene.internal.hppc.BitMixer;
+import org.apache.lucene.internal.hppc.IntCursor;
+import org.apache.lucene.internal.hppc.IntIntHashMap;
 
 /**
  * A thin wrapper of {@link IntIntHashMap} Maps from state in integer representation to its
@@ -89,8 +90,8 @@ final class StateSet extends IntSet {
     }
     arrayCache = new int[inner.size()];
     int i = 0;
-    for (IntIntHashMap.IntCursor cursor : inner.keys()) {
-      arrayCache[i++] = cursor.value;
+    for (IntCursor key : inner.keys()) {
+      arrayCache[i++] = key.value;
     }
     // we need to sort this array since "equals" method depend on this
     Arrays.sort(arrayCache);
@@ -109,8 +110,8 @@ final class StateSet extends IntSet {
       return hashCode;
     }
     hashCode = inner.size();
-    for (IntIntHashMap.IntCursor cursor : inner.keys()) {
-      hashCode += BitMixer.mix(cursor.value);
+    for (IntCursor key : inner.keys()) {
+      hashCode += BitMixer.mix(key.value);
     }
     hashUpdated = true;
     return hashCode;

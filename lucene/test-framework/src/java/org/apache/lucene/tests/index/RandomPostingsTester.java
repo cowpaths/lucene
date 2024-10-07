@@ -114,7 +114,7 @@ public class RandomPostingsTester {
 
     // Test w/ multiple threads
     THREADS
-  };
+  }
 
   private long totalPostings;
   private long totalPayloadBytes;
@@ -165,6 +165,7 @@ public class RandomPostingsTester {
               0,
               VectorEncoding.FLOAT32,
               VectorSimilarityFunction.EUCLIDEAN,
+              false,
               false);
       fieldUpto++;
 
@@ -695,6 +696,7 @@ public class RandomPostingsTester {
             "_0",
             maxDoc,
             false,
+            false,
             codec,
             Collections.emptyMap(),
             StringHelper.randomId(),
@@ -737,6 +739,7 @@ public class RandomPostingsTester {
               0,
               VectorEncoding.FLOAT32,
               VectorSimilarityFunction.EUCLIDEAN,
+              false,
               false);
     }
 
@@ -954,7 +957,7 @@ public class RandomPostingsTester {
 
     assertNotNull("null DocsEnum", postingsEnum);
     int initialDocID = postingsEnum.docID();
-    assertEquals("inital docID should be -1" + postingsEnum, -1, initialDocID);
+    assertEquals("initial docID should be -1: " + postingsEnum, -1, initialDocID);
 
     if (LuceneTestCase.VERBOSE) {
       if (prevPostingsEnum == null) {
@@ -1628,7 +1631,7 @@ public class RandomPostingsTester {
         }
         TermsEnum intersected = fieldsSource.terms(field).intersect(ca, startTerm);
 
-        Set<BytesRef> intersectedTerms = new HashSet<BytesRef>();
+        Set<BytesRef> intersectedTerms = new HashSet<>();
         BytesRef term;
         while ((term = intersected.next()) != null) {
           if (startTerm != null) {

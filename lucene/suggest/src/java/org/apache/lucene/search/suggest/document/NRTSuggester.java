@@ -325,7 +325,10 @@ public final class NRTSuggester implements Accountable {
       case OFF_HEAP:
         return true;
       case AUTO:
-        return input instanceof ByteBufferIndexInput;
+        // TODO: Make this less hacky to maybe expose "off-heap" feature using a marker interface on
+        // the IndexInput
+        return input instanceof ByteBufferIndexInput
+            || input.getClass().getName().contains(".MemorySegmentIndexInput");
       default:
         throw new IllegalStateException("unknown enum constant: " + fstLoadMode);
     }
@@ -337,25 +340,16 @@ public final class NRTSuggester implements Accountable {
    */
   public static NRTSuggester load(IndexInput input, FSTLoadMode fstLoadMode) throws IOException {
     final FST<Pair<Long, BytesRef>> fst;
+    PairOutputs<Long, BytesRef> outputs =
+        new PairOutputs<>(PositiveIntOutputs.getSingleton(), ByteSequenceOutputs.getSingleton());
     if (shouldLoadFSTOffHeap(input, fstLoadMode)) {
       OffHeapFSTStore store = new OffHeapFSTStore();
       IndexInput clone = input.clone();
       clone.seek(input.getFilePointer());
-      fst =
-          new FST<>(
-              clone,
-              clone,
-              new PairOutputs<>(
-                  PositiveIntOutputs.getSingleton(), ByteSequenceOutputs.getSingleton()),
-              store);
+      fst = new FST<>(FST.readMetadata(clone, outputs), clone, store);
       input.seek(clone.getFilePointer() + store.size());
     } else {
-      fst =
-          new FST<>(
-              input,
-              input,
-              new PairOutputs<>(
-                  PositiveIntOutputs.getSingleton(), ByteSequenceOutputs.getSingleton()));
+      fst = new FST<>(FST.readMetadata(input, outputs), input);
     }
 
     /* read some meta info */

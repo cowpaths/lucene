@@ -31,7 +31,7 @@ import org.apache.lucene.search.SimpleCollector;
  */
 public abstract class DocValuesTermsCollector<DV> extends SimpleCollector {
   @FunctionalInterface
-  static interface Function<R> {
+  interface Function<R> {
     R apply(LeafReader t) throws IOException;
   }
 
