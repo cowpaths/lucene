@@ -18,6 +18,9 @@ API Changes
 * GITHUB#12592: Add RandomAccessInput#length method to the RandomAccessInput interface. In addition deprecate
   ByteBuffersDataInput#size in favour of this new method. (Ignacio Vera)
 
+* GITHUB#12646: Move FST#addNode to FSTCompiler to avoid a circular dependency between FST and FSTCompiler
+  (Anh Dung Bui via Alan Woodward)
+
 New Features
 ---------------------
 (No changes)
@@ -51,6 +54,9 @@ Optimizations
   to reduce GC load during indexing. (Guo Feng)
 
 * GITHUB#12623: Use a MergeSorter taking advantage of extra storage for StableMSBRadixSorter. (Guo Feng)
+
+* GITHUB#12631: Write MSB VLong for better outputs sharing in block tree index, decreasing ~14% size
+  of .tip file. (Guo Feng)
 
 Changes in runtime behavior
 ---------------------
