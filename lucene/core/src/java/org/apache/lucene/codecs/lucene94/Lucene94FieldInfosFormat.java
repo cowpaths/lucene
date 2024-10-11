@@ -112,8 +112,6 @@ import org.apache.lucene.store.IndexOutput;
  *         <li>0: EUCLIDEAN distance. ({@link VectorSimilarityFunction#EUCLIDEAN})
  *         <li>1: DOT_PRODUCT similarity. ({@link VectorSimilarityFunction#DOT_PRODUCT})
  *         <li>2: COSINE similarity. ({@link VectorSimilarityFunction#COSINE})
- *         <li>3: MAXIMUM_INNER_PRODUCT similarity. ({@link
- *             VectorSimilarityFunction#MAXIMUM_INNER_PRODUCT})
  *       </ul>
  * </ul>
  *
@@ -134,14 +132,13 @@ public final class Lucene94FieldInfosFormat extends FieldInfosFormat {
       Throwable priorE = null;
       FieldInfo[] infos = null;
       try {
-        int format =
-            CodecUtil.checkIndexHeader(
-                input,
-                Lucene94FieldInfosFormat.CODEC_NAME,
-                Lucene94FieldInfosFormat.FORMAT_START,
-                Lucene94FieldInfosFormat.FORMAT_CURRENT,
-                segmentInfo.getId(),
-                segmentSuffix);
+        CodecUtil.checkIndexHeader(
+            input,
+            Lucene94FieldInfosFormat.CODEC_NAME,
+            Lucene94FieldInfosFormat.FORMAT_START,
+            Lucene94FieldInfosFormat.FORMAT_CURRENT,
+            segmentInfo.getId(),
+            segmentSuffix);
 
         final int size = input.readVInt(); // read in the size
         infos = new FieldInfo[size];
@@ -161,18 +158,6 @@ public final class Lucene94FieldInfosFormat extends FieldInfosFormat {
           boolean omitNorms = (bits & OMIT_NORMS) != 0;
           boolean storePayloads = (bits & STORE_PAYLOADS) != 0;
           boolean isSoftDeletesField = (bits & SOFT_DELETES_FIELD) != 0;
-          boolean isParentField =
-              format >= FORMAT_PARENT_FIELD ? (bits & PARENT_FIELD_FIELD) != 0 : false;
-
-          if ((bits & 0xE0) != 0) {
-            throw new CorruptIndexException(
-                "unused bits are set \"" + Integer.toBinaryString(bits) + "\"", input);
-          }
-          if (format < FORMAT_PARENT_FIELD && (bits & 0xF0) != 0) {
-            throw new CorruptIndexException(
-                "parent field bit is set but shouldn't \"" + Integer.toBinaryString(bits) + "\"",
-                input);
-          }
 
           final IndexOptions indexOptions = getIndexOptions(input, input.readByte());
 
@@ -217,7 +202,7 @@ public final class Lucene94FieldInfosFormat extends FieldInfosFormat {
                     vectorEncoding,
                     vectorDistFunc,
                     isSoftDeletesField,
-                    isParentField);
+                    false);
             infos[i].checkConsistency();
           } catch (IllegalStateException e) {
             throw new CorruptIndexException(
@@ -393,7 +378,6 @@ public final class Lucene94FieldInfosFormat extends FieldInfosFormat {
         if (fi.omitsNorms()) bits |= OMIT_NORMS;
         if (fi.hasPayloads()) bits |= STORE_PAYLOADS;
         if (fi.isSoftDeletesField()) bits |= SOFT_DELETES_FIELD;
-        if (fi.isParentField()) bits |= PARENT_FIELD_FIELD;
         output.writeByte(bits);
 
         output.writeByte(indexOptionsByte(fi.getIndexOptions()));
@@ -409,7 +393,7 @@ public final class Lucene94FieldInfosFormat extends FieldInfosFormat {
         }
         output.writeVInt(fi.getVectorDimension());
         output.writeByte((byte) fi.getVectorEncoding().ordinal());
-        output.writeByte(distFuncToOrd(fi.getVectorSimilarityFunction()));
+        output.writeByte((byte) fi.getVectorSimilarityFunction().ordinal());
       }
       CodecUtil.writeFooter(output);
     }
@@ -421,14 +405,11 @@ public final class Lucene94FieldInfosFormat extends FieldInfosFormat {
   // Codec header
   static final String CODEC_NAME = "Lucene94FieldInfos";
   static final int FORMAT_START = 0;
-  // this doesn't actually change the file format but uses up one more bit an existing bit pattern
-  static final int FORMAT_PARENT_FIELD = 1;
-  static final int FORMAT_CURRENT = FORMAT_PARENT_FIELD;
+  static final int FORMAT_CURRENT = FORMAT_START;
 
   // Field flags
   static final byte STORE_TERMVECTOR = 0x1;
   static final byte OMIT_NORMS = 0x2;
   static final byte STORE_PAYLOADS = 0x4;
   static final byte SOFT_DELETES_FIELD = 0x8;
-  static final byte PARENT_FIELD_FIELD = 0x10;
 }
