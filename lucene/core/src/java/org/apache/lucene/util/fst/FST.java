@@ -547,7 +547,7 @@ public final class FST<T> implements Accountable {
    * @param metaOut the DataOutput to write the metadata to
    */
   public void saveMetadata(DataOutput metaOut) throws IOException {
-    CodecUtil.writeHeader(metaOut, FILE_FORMAT_NAME, VERSION_CURRENT);
+    CodecUtil.writeHeader(metaOut, FILE_FORMAT_NAME, VERSION_90);
     // TODO: really we should encode this as an arc, arriving
     // to the root node, instead of special casing here:
     if (metadata.emptyOutput != null) {
