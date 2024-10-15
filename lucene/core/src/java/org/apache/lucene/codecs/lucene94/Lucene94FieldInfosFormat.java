@@ -378,7 +378,7 @@ public final class Lucene94FieldInfosFormat extends FieldInfosFormat {
       CodecUtil.writeIndexHeader(
           output,
           Lucene94FieldInfosFormat.CODEC_NAME,
-          Lucene94FieldInfosFormat.FORMAT_CURRENT,
+          Lucene94FieldInfosFormat.FORMAT_START, // temporarily backdate this
           segmentInfo.getId(),
           segmentSuffix);
       output.writeVInt(infos.size());
@@ -393,7 +393,10 @@ public final class Lucene94FieldInfosFormat extends FieldInfosFormat {
         if (fi.omitsNorms()) bits |= OMIT_NORMS;
         if (fi.hasPayloads()) bits |= STORE_PAYLOADS;
         if (fi.isSoftDeletesField()) bits |= SOFT_DELETES_FIELD;
-        if (fi.isParentField()) bits |= PARENT_FIELD_FIELD;
+        if (fi.isParentField()) {
+          throw new IllegalArgumentException("temporarily disallow this");
+          // bits |= PARENT_FIELD_FIELD;
+        }
         output.writeByte(bits);
 
         output.writeByte(indexOptionsByte(fi.getIndexOptions()));
