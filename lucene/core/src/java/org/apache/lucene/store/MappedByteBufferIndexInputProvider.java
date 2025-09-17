@@ -37,7 +37,8 @@ import org.apache.lucene.store.ByteBufferGuard.BufferCleaner;
 import org.apache.lucene.util.Constants;
 import org.apache.lucene.util.SuppressForbidden;
 
-public final class MappedByteBufferIndexInputProvider implements MMapDirectory.MMapIndexInputProvider {
+public final class MappedByteBufferIndexInputProvider
+    implements MMapDirectory.MMapIndexInputProvider {
 
   private static final Logger LOG =
       Logger.getLogger(MappedByteBufferIndexInputProvider.class.getName());
