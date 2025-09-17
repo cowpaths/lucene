@@ -198,8 +198,8 @@ PARSER_END(QueryParser)
 | <#_WHITESPACE: ( " " | "\t" | "\n" | "\r" ) >
 | <#_STAR:       "*" > /* term truncation */
 | <#_ONE_CHAR:   "?" > /* precisely one character in a term */
-/* 2..99 prefix for distance operators */
-| <#_DISTOP_NUM: ((["2"-"9"](["0"-"9"])?) | ("1" ["0"-"9"]))> 
+/* x >= 2 prefix for distance operators */
+| <#_DISTOP_NUM: ((["2"-"9"](["0"-"9"])*) | ("1" (["0"-"9"])+))>
 }
 
 <DEFAULT> SKIP : {

@@ -16,6 +16,8 @@
  */
 package org.apache.lucene.queryparser.surround.query;
 
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import junit.framework.TestSuite;
 import junit.textui.TestRunner;
 import org.apache.lucene.tests.util.LuceneTestCase;
@@ -65,6 +67,7 @@ public class Test03Distance extends LuceneTestCase {
     db1 = new SingleFieldTestDb(random(), docs1, fieldName);
     db2 = new SingleFieldTestDb(random(), docs2, fieldName);
     db3 = new SingleFieldTestDb(random(), docs3, fieldName);
+    db4 = new SingleFieldTestDb(random(), DOCS4, fieldName);
   }
 
   private void distanceTst(String query, int[] expdnrs, SingleFieldTestDb db) throws Exception {
@@ -310,5 +313,58 @@ public class Test03Distance extends LuceneTestCase {
             + "5n(temperat*, (invers* or (negativ* 3n gradient*))),"
             + "rain* or precipitat*)",
         expdnrs);
+  }
+
+  private static final String[] DOCS4;
+
+  private static String distanceString(int distance) {
+    return Stream.generate(() -> "o")
+        .limit(distance)
+        .collect(Collectors.joining(" ", "w1 ", " w2"));
+  }
+
+  static {
+    DOCS4 =
+        new String[] {
+          "empty", distanceString(1), distanceString(20), distanceString(80), distanceString(150)
+        };
+  }
+
+  SingleFieldTestDb db4;
+
+  public void distanceTest4(String query, int[] expdnrs) throws Exception {
+    distanceTst(query, expdnrs, db4);
+  }
+
+  public void test4Wprefix02() throws Exception {
+    int[] expdnrs = {1};
+    distanceTest4("2W(w1,w2)", expdnrs);
+  }
+
+  public void test4Wprefix22() throws Exception {
+    int[] expdnrs = {1, 2};
+    distanceTest4("22W(w1,w2)", expdnrs);
+  }
+
+  public void test4Wprefix82() throws Exception {
+    int[] expdnrs = {1, 2, 3};
+    distanceTest4("82W(w1,w2)", expdnrs);
+  }
+
+  public void test4Wprefix152() throws Exception {
+    int[] expdnrs = {1, 2, 3, 4};
+    distanceTest4("152W(w1,w2)", expdnrs);
+  }
+
+  public void test4WprefixMaxDist() throws Exception {
+    int[] expdnrs = {1, 2, 3, 4};
+    distanceTest4(Integer.MAX_VALUE + "W(w1,w2)", expdnrs);
+  }
+
+  public void test4WprefixTooHighDist() throws Exception {
+    int[] expdnrs = {1, 2, 3, 4};
+    expectThrows(
+        NumberFormatException.class,
+        () -> distanceTest4((1L + Integer.MAX_VALUE) + "W(w1,w2)", expdnrs));
   }
 }
