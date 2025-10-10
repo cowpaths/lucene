@@ -116,7 +116,9 @@ final class SegmentCoreReaders {
       if (coreFieldInfos.hasPostings()) {
         final PostingsFormat format = codec.postingsFormat();
         // Ask codec for its Fields
-        fields = format.fieldsProducer(segmentReadState);
+        fields =
+            Unloader.fieldsProducer(
+                () -> format.fieldsProducer(segmentReadState), dir, segmentReadState);
         assert fields != null;
       } else {
         fields = null;

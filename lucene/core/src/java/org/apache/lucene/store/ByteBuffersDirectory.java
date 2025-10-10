@@ -30,13 +30,18 @@ import java.util.Locale;
 import java.util.Objects;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.zip.CRC32;
 import org.apache.lucene.index.IndexFileNames;
+import org.apache.lucene.index.Unloader;
 import org.apache.lucene.util.BitUtil;
+import org.apache.lucene.util.InfoStream;
+import org.apache.lucene.util.NamedThreadFactory;
 
 /**
  * A {@link ByteBuffer}-based {@link Directory} implementation that can be used to store index files
@@ -49,7 +54,7 @@ import org.apache.lucene.util.BitUtil;
  *
  * @lucene.experimental
  */
-public final class ByteBuffersDirectory extends BaseDirectory {
+public final class ByteBuffersDirectory extends BaseDirectory implements UnloaderCoordinationPoint {
   public static final BiFunction<String, ByteBuffersDataOutput, IndexInput> OUTPUT_AS_MANY_BUFFERS =
       (fileName, output) -> {
         ByteBuffersDataInput dataInput = output.toDataInput();
@@ -159,6 +164,9 @@ public final class ByteBuffersDirectory extends BaseDirectory {
     super(factory);
     this.outputToInput = Objects.requireNonNull(outputToInput);
     this.bbOutputSupplier = Objects.requireNonNull(bbOutputSupplier);
+    if (exec != null) {
+      unloadHelperSupplier = () -> new Unloader.AbstractUnloadHelper(exec, InfoStream.NO_OUTPUT) {};
+    }
   }
 
   @Override
@@ -256,7 +264,32 @@ public final class ByteBuffersDirectory extends BaseDirectory {
   @Override
   public void close() throws IOException {
     isOpen = false;
+    if (Unloader.EXECUTOR_PER_DIRECTORY) {
+      exec.shutdownNow();
+    }
     files.clear();
+  }
+
+  private ScheduledExecutorService exec =
+      Unloader.EXECUTOR_PER_DIRECTORY
+          ? Executors.newSingleThreadScheduledExecutor(
+              new NamedThreadFactory("unload@" + System.identityHashCode(this)))
+          : null;
+
+  private volatile Supplier<Unloader.UnloadHelper> unloadHelperSupplier;
+
+  @Override
+  public void setUnloadHelperSupplier(Supplier<Unloader.UnloadHelper> supplier) {
+    if (Unloader.EXECUTOR_PER_DIRECTORY) {
+      throw new IllegalStateException();
+    }
+    this.unloadHelperSupplier = supplier;
+  }
+
+  @Override
+  public Unloader.UnloadHelper getUnloadHelper() {
+    Supplier<Unloader.UnloadHelper> supplier = unloadHelperSupplier;
+    return supplier == null ? null : supplier.get();
   }
 
   @Override
