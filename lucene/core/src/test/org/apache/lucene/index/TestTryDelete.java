@@ -100,6 +100,7 @@ public class TestTryDelete extends LuceneTestCase {
     topDocs = searcher.search(new TermQuery(new Term("foo", "0")), 100);
 
     assertEquals(0, topDocs.totalHits.value);
+    directory.close();
   }
 
   public void testTryDeleteDocumentCloseAndReopen() throws IOException {
@@ -137,6 +138,7 @@ public class TestTryDelete extends LuceneTestCase {
     topDocs = searcher.search(new TermQuery(new Term("foo", "0")), 100);
 
     assertEquals(0, topDocs.totalHits.value);
+    directory.close();
   }
 
   public void testDeleteDocuments() throws IOException {
@@ -166,5 +168,6 @@ public class TestTryDelete extends LuceneTestCase {
     topDocs = searcher.search(new TermQuery(new Term("foo", "0")), 100);
 
     assertEquals(0, topDocs.totalHits.value);
+    directory.close();
   }
 }

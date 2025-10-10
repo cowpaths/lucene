@@ -383,6 +383,9 @@ public class TestIndexWriterCommit extends LuceneTestCase {
                     assertTrue(r2 != r);
                     r.close();
                     r = r2;
+                    // TODO: we sometimes hit `Unloader`-related FileNotFoundExceptions
+                    //  here, because there's no connection between IndexWriter and Reader.
+                    // TODO: Confirm this is only a test issue.
                     assertEquals("term=f:" + s + "; r=" + r, 1, r.docFreq(new Term("f", s)));
                   }
                 } while (++iterations < maxIterations);

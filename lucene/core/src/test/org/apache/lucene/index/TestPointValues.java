@@ -772,6 +772,7 @@ public class TestPointValues extends LuceneTestCase {
     assertNull(PointValues.getMaxPackedValue(reader, "field2"));
     assertEquals(0, PointValues.getDocCount(reader, "field2"));
     assertEquals(0, PointValues.size(reader, "field2"));
+    dir.close();
   }
 
   public void testMergedStatsAllPointsDeleted() throws IOException {
@@ -792,6 +793,7 @@ public class TestPointValues extends LuceneTestCase {
     assertNull(PointValues.getMaxPackedValue(reader, "field"));
     assertEquals(0, PointValues.getDocCount(reader, "field"));
     assertEquals(0, PointValues.size(reader, "field"));
+    dir.close();
   }
 
   public void testMergedStats() throws IOException {

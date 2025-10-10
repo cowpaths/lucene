@@ -93,6 +93,7 @@ public class TestSizeBoundedForceMerge extends LuceneTestCase {
     // Should only be 3 segments in the index, because one of them exceeds the size limit
     sis = SegmentInfos.readLatestCommit(dir);
     assertEquals(3, sis.size());
+    dir.close();
   }
 
   public void testNumDocsLimit() throws Exception {
@@ -125,6 +126,7 @@ public class TestSizeBoundedForceMerge extends LuceneTestCase {
     // Should only be 3 segments in the index, because one of them exceeds the size limit
     SegmentInfos sis = SegmentInfos.readLatestCommit(dir);
     assertEquals(3, sis.size());
+    dir.close();
   }
 
   public void testLastSegmentTooLarge() throws Exception {
@@ -151,6 +153,7 @@ public class TestSizeBoundedForceMerge extends LuceneTestCase {
 
     SegmentInfos sis = SegmentInfos.readLatestCommit(dir);
     assertEquals(2, sis.size());
+    dir.close();
   }
 
   public void testFirstSegmentTooLarge() throws Exception {
@@ -177,6 +180,7 @@ public class TestSizeBoundedForceMerge extends LuceneTestCase {
 
     SegmentInfos sis = SegmentInfos.readLatestCommit(dir);
     assertEquals(2, sis.size());
+    dir.close();
   }
 
   public void testAllSegmentsSmall() throws Exception {
@@ -203,6 +207,7 @@ public class TestSizeBoundedForceMerge extends LuceneTestCase {
 
     SegmentInfos sis = SegmentInfos.readLatestCommit(dir);
     assertEquals(1, sis.size());
+    dir.close();
   }
 
   public void testAllSegmentsLarge() throws Exception {
@@ -228,6 +233,7 @@ public class TestSizeBoundedForceMerge extends LuceneTestCase {
 
     SegmentInfos sis = SegmentInfos.readLatestCommit(dir);
     assertEquals(3, sis.size());
+    dir.close();
   }
 
   public void testOneLargeOneSmall() throws Exception {
@@ -254,6 +260,7 @@ public class TestSizeBoundedForceMerge extends LuceneTestCase {
 
     SegmentInfos sis = SegmentInfos.readLatestCommit(dir);
     assertEquals(4, sis.size());
+    dir.close();
   }
 
   public void testMergeFactor() throws Exception {
@@ -286,6 +293,7 @@ public class TestSizeBoundedForceMerge extends LuceneTestCase {
     // max merge docs settings.
     SegmentInfos sis = SegmentInfos.readLatestCommit(dir);
     assertEquals(4, sis.size());
+    dir.close();
   }
 
   public void testSingleMergeableSegment() throws Exception {
@@ -315,6 +323,7 @@ public class TestSizeBoundedForceMerge extends LuceneTestCase {
     SegmentInfos sis = SegmentInfos.readLatestCommit(dir);
     assertEquals(3, sis.size());
     assertFalse(sis.info(2).hasDeletions());
+    dir.close();
   }
 
   public void testSingleNonMergeableSegment() throws Exception {
@@ -339,6 +348,7 @@ public class TestSizeBoundedForceMerge extends LuceneTestCase {
     // Verify that the last segment does not have deletions.
     SegmentInfos sis = SegmentInfos.readLatestCommit(dir);
     assertEquals(1, sis.size());
+    dir.close();
   }
 
   public void testSingleMergeableTooLargeSegment() throws Exception {
@@ -367,5 +377,6 @@ public class TestSizeBoundedForceMerge extends LuceneTestCase {
     SegmentInfos sis = SegmentInfos.readLatestCommit(dir);
     assertEquals(1, sis.size());
     assertTrue(sis.info(0).hasDeletions());
+    dir.close();
   }
 }
