@@ -73,13 +73,47 @@ public class Unloader<T extends Closeable> implements Closeable {
   private final UnloadHelper reporter;
   private final ScheduledExecutorService exec;
 
-  private static final class DelegateFuture<T> extends CompletableFuture<T> {
+  private static final class DelegateFuture<T> extends CompletableFuture<WeakReference<T>>
+      implements Closeable {
     private final boolean unloading;
     private final WeakReference<DelegateFuture<T>> prev;
     private final AtomicInteger refCount;
+    private volatile T strongRef;
 
     @SuppressWarnings("unused")
     private DelegateFuture<T> hardRef; // kept to prevent collection
+
+    public boolean completeStrong(T value) {
+      if (super.complete(new WeakReference<>(value))) {
+        strongRef = value;
+        return true;
+      } else {
+        return false;
+      }
+    }
+
+    public T getNowStrong(T valueIfAbsent) {
+      T ret;
+      WeakReference<T> extant = super.getNow(null);
+      if (extant == null) {
+        return valueIfAbsent;
+      } else if ((ret = extant.get()) == null) {
+        throw new NullPointerException();
+      } else {
+        return ret;
+      }
+    }
+
+    public T getStrong(long timeout, TimeUnit unit)
+        throws InterruptedException, ExecutionException, TimeoutException {
+      WeakReference<T> ref = super.get(timeout, unit);
+      T ret = ref.get();
+      if (ret == null) {
+        throw new NullPointerException();
+      } else {
+        return ret;
+      }
+    }
 
     private DelegateFuture(boolean unloading, DelegateFuture<T> prev, int initialRefCount) {
       this.unloading = unloading;
@@ -117,6 +151,12 @@ public class Unloader<T extends Closeable> implements Closeable {
       } else {
         return refCount.updateAndGet(UNLOAD) == UNLOADED_REFCOUNT;
       }
+    }
+
+    @Override
+    public void close() {
+      // release so it can be GC'd
+      strongRef = null;
     }
   }
 
@@ -161,7 +201,7 @@ public class Unloader<T extends Closeable> implements Closeable {
     try {
       description = receiveFirstInstance.apply(in);
       DelegateFuture<T> holder = new DelegateFuture<>(false, null, 0);
-      holder.complete(in);
+      holder.completeStrong(in);
       backing = new AtomicReference<>(holder);
       this.reopen = reopen;
       this.keepAliveNanos = keepAliveNanos;
@@ -308,7 +348,7 @@ public class Unloader<T extends Closeable> implements Closeable {
     // try to unload
     try {
       T weUnloaded = doUnload(holder, unloaded);
-      holder.complete(weUnloaded);
+      holder.complete(new WeakReference<>(weUnloaded));
       if (weUnloaded != null) {
         return UNLOADED;
       } else {
@@ -322,12 +362,12 @@ public class Unloader<T extends Closeable> implements Closeable {
 
   private T doUnload(DelegateFuture<T> holder, boolean[] unloaded) throws IOException {
     assert injectDelay(unloadRandom, 5, 20);
-    DelegateFuture<T> active;
+    final DelegateFuture<T> active;
     T toClose;
     try {
       active = holder.prev.get();
       assert active != null;
-      toClose = active.getNow(null);
+      toClose = active.getNowStrong(null);
     } catch (
         @SuppressWarnings("unused")
         Exception ex) {
@@ -356,7 +396,7 @@ public class Unloader<T extends Closeable> implements Closeable {
         // time, because it's a leak at this point if we don't close the
         // resource we've pulled.
         try {
-          toClose = active.get(10, TimeUnit.MINUTES);
+          toClose = active.getStrong(10, TimeUnit.MINUTES);
         } catch (InterruptedException ex) {
           // we're probably shutting down
           throw new ThreadInterruptedException(ex);
@@ -377,7 +417,9 @@ public class Unloader<T extends Closeable> implements Closeable {
         }
       }
     }
-    toClose.close();
+    try (active) {
+      toClose.close();
+    }
     unloaded[0] = true;
     return toClose;
   }
@@ -469,6 +511,11 @@ public class Unloader<T extends Closeable> implements Closeable {
    * interrupted status before returning.
    *
    * <p>TODO: evaluate whether this behavior is actually desired in non-test context.
+   *
+   * <p>This method may return null! It should only be called (directly or indirectly) from within
+   * top-level {@link Unloader#close()} code. It is guaranteed to block for the specified amount of
+   * time, and is thus appropriate for coordination; but it should be considered "best-effort" in
+   * terms of returning an actual {@link Closeable} value.
    */
   private static <T extends Closeable> T interruptProtectedGet(
       DelegateFuture<T> future, long longWaitSeconds, TimeUnit timeUnit)
@@ -480,7 +527,7 @@ public class Unloader<T extends Closeable> implements Closeable {
     try {
       while ((waitNanos = until - now) >= 0) {
         try {
-          return future.get(waitNanos, TimeUnit.NANOSECONDS);
+          return future.get(waitNanos, TimeUnit.NANOSECONDS).get();
         } catch (
             @SuppressWarnings("unused")
             InterruptedException ex) {
@@ -526,7 +573,8 @@ public class Unloader<T extends Closeable> implements Closeable {
     long until = now + TOTAL_BLOCK_NANOS;
     while (!weCompute[0]) {
       try {
-        return new CloseableVal<>(holder.get(until - now, TimeUnit.NANOSECONDS), holder.refCount);
+        return new CloseableVal<>(
+            holder.getStrong(until - now, TimeUnit.NANOSECONDS), holder.refCount);
       } catch (ExecutionException e) {
         Throwable t = e.getCause();
         if (t instanceof IOException) {
@@ -547,7 +595,7 @@ public class Unloader<T extends Closeable> implements Closeable {
     T candidate = null;
     try {
       candidate = reopen.apply(this);
-      holder.complete(candidate);
+      holder.completeStrong(candidate);
       successfullyComputed = true;
       return new CloseableVal<>(candidate, holder.refCount);
     } catch (Throwable t) {
