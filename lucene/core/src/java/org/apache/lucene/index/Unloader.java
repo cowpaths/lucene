@@ -34,7 +34,6 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.LongAdder;
@@ -163,7 +162,8 @@ public class Unloader<T extends Closeable> implements Closeable {
   @SuppressWarnings("unchecked")
   private final DelegateFuture<T> closedSentinel = (DelegateFuture<T>) CLOSED;
 
-  private static final AtomicBoolean EXTERNAL_REFQUEUE_HANDLING = new AtomicBoolean();
+  private static final AtomicReference<Boolean> EXTERNAL_REFQUEUE_HANDLING =
+      new AtomicReference<>();
 
   private static final LongAdder OUTSTANDING_SIZE = new LongAdder();
 
@@ -191,7 +191,7 @@ public class Unloader<T extends Closeable> implements Closeable {
       long keepAliveNanos,
       IOFunction<T, String> receiveFirstInstance)
       throws IOException {
-    if (!EXTERNAL_REFQUEUE_HANDLING.get()) {
+    if (EXTERNAL_REFQUEUE_HANDLING.get() != Boolean.TRUE) {
       unloadHelper.maybeHandleRefQueues(
           removeOutstanding, REF_REMOVER, EXTERNAL_REFQUEUE_HANDLING, OUTSTANDING_SIZE_SUPPLIER);
     }
@@ -334,7 +334,7 @@ public class Unloader<T extends Closeable> implements Closeable {
    * somewhere.
    */
   public long maybeUnload() throws IOException {
-    if (!EXTERNAL_REFQUEUE_HANDLING.get()) drainRemoveOutstanding();
+    if (EXTERNAL_REFQUEUE_HANDLING.get() != Boolean.TRUE) drainRemoveOutstanding();
     long nanosSinceLastAccess = System.nanoTime() - lastAccessNanos;
     if (nanosSinceLastAccess < keepAliveNanos) {
       // don't unload
@@ -670,8 +670,8 @@ public class Unloader<T extends Closeable> implements Closeable {
   /**
    * Number of ram bytes per instance of {@link Ref}. This can be used in conjunction with {@link
    * #OUTSTANDING_SIZE_SUPPLIER} (accessed via the final arg to {@link
-   * UnloadHelper#maybeHandleRefQueues(ReferenceQueue[], Consumer, AtomicBoolean, LongSupplier)}) to
-   * determine the point-in-time heap usage associated with refQueue reference tracking.
+   * UnloadHelper#maybeHandleRefQueues(ReferenceQueue[], Consumer, AtomicReference, LongSupplier)})
+   * to determine the point-in-time heap usage associated with refQueue reference tracking.
    */
   public static final long RAMBYTES_PER_REF =
       RamUsageEstimator.shallowSizeOfInstance(Ref.class)
@@ -704,7 +704,7 @@ public class Unloader<T extends Closeable> implements Closeable {
   private static void add(final Object o, AtomicInteger refCount) {
     int parallelIdx = Thread.currentThread().hashCode() & PARALLEL_HEAD_MASK;
     OUTSTANDING_SIZE.increment();
-    if (!EXTERNAL_REFQUEUE_HANDLING.get()) drainRemoveOutstanding();
+    if (EXTERNAL_REFQUEUE_HANDLING.get() != Boolean.TRUE) drainRemoveOutstanding();
     Ref head = HEAD[parallelIdx];
     final Ref ref = new Ref(o, removeOutstanding[parallelIdx], refCount, head);
     Ref next = reserve(head, RESERVED);
@@ -944,7 +944,7 @@ public class Unloader<T extends Closeable> implements Closeable {
    * the underlying components that handle load/unload according to framework lifecycles.
    *
    * <p>e.g., framework may supply its own {@link ScheduledExecutorService} for running unload
-   * checks, and may (via {@link #maybeHandleRefQueues(ReferenceQueue[], Consumer, AtomicBoolean,
+   * checks, and may (via {@link #maybeHandleRefQueues(ReferenceQueue[], Consumer, AtomicReference,
    * LongSupplier)} manage the handling of reference tracking as well.
    */
   public interface UnloadHelper {
@@ -996,7 +996,7 @@ public class Unloader<T extends Closeable> implements Closeable {
     default void maybeHandleRefQueues(
         ReferenceQueue<Object>[] queues,
         Consumer<Object> handler,
-        AtomicBoolean handleRefQueue,
+        AtomicReference<Boolean> handleRefQueue,
         LongSupplier outstandingSize) {}
     ;
   }

@@ -31,6 +31,7 @@ import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
@@ -245,7 +246,8 @@ public class TestUnloader extends LuceneTestCase {
     LongSupplier[] outstandingSizeHolder = new LongSupplier[1];
     @SuppressWarnings({"unchecked", "rawtypes"})
     ReferenceQueue<Object>[][] removeOutstandingHolder = new ReferenceQueue[1][];
-    AtomicBoolean[] handleRefQueueHolder = new AtomicBoolean[1];
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    AtomicReference<Boolean>[] handleRefQueueHolder = new AtomicReference[1];
     Unloader.configure(
         new Unloader.UnloadHelper() {
           @Override
@@ -257,7 +259,7 @@ public class TestUnloader extends LuceneTestCase {
           public void maybeHandleRefQueues(
               ReferenceQueue<Object>[] queues,
               Consumer<Object> handler,
-              AtomicBoolean handleRefQueue,
+              AtomicReference<Boolean> handleRefQueue,
               LongSupplier outstandingSize) {
             handleRefQueue.set(true);
             handleRefQueueHolder[0] = handleRefQueue;
@@ -267,7 +269,7 @@ public class TestUnloader extends LuceneTestCase {
           }
         });
     ReferenceQueue<Object>[] queues = removeOutstandingHolder[0];
-    AtomicBoolean handleRefQueue = handleRefQueueHolder[0];
+    AtomicReference<Boolean> handleRefQueue = handleRefQueueHolder[0];
     Consumer<Object> handler = registerRef[0];
     LongSupplier outstandingSize = outstandingSizeHolder[0];
 
@@ -310,12 +312,12 @@ public class TestUnloader extends LuceneTestCase {
               () -> {
                 activeRefQueueProcessors.increment();
                 try {
-                  while (handleRefQueue.get()) {
+                  while (handleRefQueue.get() == Boolean.TRUE) {
                     handler.accept(q.remove());
                     collectedRefs.increment();
                   }
                 } catch (InterruptedException ex) {
-                  if (handleRefQueue.get()) {
+                  if (handleRefQueue.get() == Boolean.TRUE) {
                     // unexpected -- we've been interrupted but are still
                     // supposed to be handling ref queue?
                     handleRefQueue.set(false);
