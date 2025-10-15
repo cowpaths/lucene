@@ -198,18 +198,22 @@ public class Unloader<T extends Closeable> implements Closeable {
     this.reporter = unloadHelper;
     this.reopen = reopen;
     this.keepAliveNanos = keepAliveNanos;
-    DelegateFuture<T> holder = new DelegateFuture<>(false, null, 0);
-    backing = new AtomicReference<>(holder);
-    this.exec = unloadHelper.onCreation(this);
-    T in = reopen.apply(this);
+    DelegateFuture<T> holder = new DelegateFuture<>(false, null, 1);
     try {
-      description = receiveFirstInstance.apply(in);
-      holder.completeStrong(in);
-    } catch (Throwable t) {
-      try (in) {
-        unloadHelper.onClose();
-        throw t;
+      backing = new AtomicReference<>(holder);
+      this.exec = unloadHelper.onCreation(this);
+      T in = reopen.apply(this);
+      try {
+        description = receiveFirstInstance.apply(in);
+        holder.completeStrong(in);
+      } catch (Throwable t) {
+        try (in) {
+          unloadHelper.onClose();
+          throw t;
+        }
       }
+    } finally {
+      holder.refCount.updateAndGet(RELEASE);
     }
   }
 
