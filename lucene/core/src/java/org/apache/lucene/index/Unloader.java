@@ -196,15 +196,15 @@ public class Unloader<T extends Closeable> implements Closeable {
           removeOutstanding, REF_REMOVER, EXTERNAL_REFQUEUE_HANDLING, OUTSTANDING_SIZE_SUPPLIER);
     }
     this.reporter = unloadHelper;
+    this.reopen = reopen;
+    this.keepAliveNanos = keepAliveNanos;
+    DelegateFuture<T> holder = new DelegateFuture<>(false, null, 0);
+    backing = new AtomicReference<>(holder);
     this.exec = unloadHelper.onCreation(this);
     T in = reopen.apply(this);
     try {
       description = receiveFirstInstance.apply(in);
-      DelegateFuture<T> holder = new DelegateFuture<>(false, null, 0);
       holder.completeStrong(in);
-      backing = new AtomicReference<>(holder);
-      this.reopen = reopen;
-      this.keepAliveNanos = keepAliveNanos;
     } catch (Throwable t) {
       try (in) {
         unloadHelper.onClose();
