@@ -43,6 +43,7 @@ import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 import org.apache.lucene.codecs.DocValuesProducer;
 import org.apache.lucene.codecs.FieldsProducer;
+import org.apache.lucene.codecs.PointsReader;
 import org.apache.lucene.store.AlreadyClosedException;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.UnloaderCoordinationPoint;
@@ -764,6 +765,58 @@ public class Unloader<T extends Closeable> implements Closeable {
     }
   }
 
+  static PointValues.PointTree wrap(PointValues.PointTree pt, Consumer<Object> registerRef) {
+    PointValues.PointTree ret =
+        new PointValues.PointTree() {
+          @Override
+          public PointValues.PointTree clone() {
+            return wrap(pt.clone(), registerRef);
+          }
+
+          @Override
+          public boolean moveToChild() throws IOException {
+            return pt.moveToChild();
+          }
+
+          @Override
+          public boolean moveToSibling() throws IOException {
+            return pt.moveToSibling();
+          }
+
+          @Override
+          public boolean moveToParent() throws IOException {
+            return pt.moveToParent();
+          }
+
+          @Override
+          public byte[] getMinPackedValue() {
+            return pt.getMinPackedValue();
+          }
+
+          @Override
+          public byte[] getMaxPackedValue() {
+            return pt.getMaxPackedValue();
+          }
+
+          @Override
+          public long size() {
+            return pt.size();
+          }
+
+          @Override
+          public void visitDocIDs(PointValues.IntersectVisitor visitor) throws IOException {
+            pt.visitDocIDs(visitor);
+          }
+
+          @Override
+          public void visitDocValues(PointValues.IntersectVisitor visitor) throws IOException {
+            pt.visitDocValues(visitor);
+          }
+        };
+    registerRef.accept(ret);
+    return ret;
+  }
+
   static TermsEnum wrap(TermsEnum te, Consumer<Object> registerRef) {
     TermsEnum ret =
         new FilterLeafReader.FilterTermsEnum(te) {
@@ -1040,6 +1093,43 @@ public class Unloader<T extends Closeable> implements Closeable {
   static void configure(UnloadHelper unloadHelper) {
     unloadHelper.maybeHandleRefQueues(
         removeOutstanding, REF_REMOVER, EXTERNAL_REFQUEUE_HANDLING, OUTSTANDING_SIZE_SUPPLIER);
+  }
+
+  public static PointsReader pointsReader(
+      IOSupplier<PointsReader> open, Directory dir, SegmentReadState srs) throws IOException {
+    UnloadHelper unloadHelper;
+    if (srs.context.mergeInfo != null
+        || srs.context.flushInfo != null
+        || DISABLE
+        || (unloadHelper = UnloaderCoordinationPoint.getUnloadHelper(dir)) == null) {
+      return open.get();
+    }
+    String type = PointsReader.class.getSimpleName();
+    return new UnloadingPointsReader(
+        unloadHelper,
+        (u) -> {
+          long start = System.nanoTime();
+          PointsReader pr = open.get();
+          try {
+            u.exec.schedule(
+                maybeUnloadTask(u, type, u.reporter),
+                KEEP_ALIVE_NANOS + INITIAL_NANOS,
+                TimeUnit.NANOSECONDS);
+          } catch (
+              @SuppressWarnings("unused")
+              RejectedExecutionException ex) {
+            // shutting down; log and swallow
+            if (u.out.isEnabled("UN"))
+              u.out.message("UN", "WARN: new PointsReader while shutting down");
+          } catch (Throwable t) {
+            try (pr) {
+              throw t;
+            }
+          }
+          u.reporter.onLoad(start - u.lastAccessNanos, System.nanoTime() - start);
+          return pr;
+        },
+        KEEP_ALIVE_NANOS);
   }
 
   /**
