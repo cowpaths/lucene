@@ -914,7 +914,11 @@ public class Unloader<T extends Closeable> implements Closeable {
    * <i>but not for Lucene as used by Solr, e.g.</i>, where {@link DirectoryReader} instances are
    * always acquired from (and incRef) {@link IndexWriter}.
    */
-  static boolean DISABLE = false;
+  static boolean DISABLE;
+
+  static {
+    DISABLE = "true".equals(System.getProperty("lucene.unload.disable"));
+  }
 
   private static final AtomicReference<List<String>> DEFERRED_INIT_MESSAGES =
       new AtomicReference<>(new ArrayList<>());
