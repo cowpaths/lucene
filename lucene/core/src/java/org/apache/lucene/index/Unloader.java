@@ -21,6 +21,7 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.io.UncheckedIOException;
+import java.lang.ref.Reference;
 import java.lang.ref.ReferenceQueue;
 import java.lang.ref.WeakReference;
 import java.nio.charset.StandardCharsets;
@@ -712,17 +713,19 @@ public class Unloader<T extends Closeable> implements Closeable {
     OUTSTANDING_SIZE.increment();
     if (EXTERNAL_REFQUEUE_HANDLING.get() != Boolean.TRUE) drainRemoveOutstanding();
     Ref head = HEAD[parallelIdx];
-    final Ref ref = new Ref(o, removeOutstanding[parallelIdx], refCount, head);
-    Ref next = reserve(head, RESERVED);
-    if (next != null) {
-      next.prev = ref;
-      ref.next.set(next);
+    try {
+      final Ref ref = new Ref(o, removeOutstanding[parallelIdx], refCount, head);
+      Ref next = reserve(head, RESERVED);
+      if (next != null) {
+        next.prev = ref;
+        ref.next.set(next);
+      }
+      if (!head.next.compareAndSet(RESERVED, ref)) {
+        throw new IllegalStateException();
+      }
+    } finally {
+      Reference.reachabilityFence(o);
     }
-    if (!head.next.compareAndSet(RESERVED, ref)) {
-      throw new IllegalStateException();
-    }
-    @SuppressWarnings("unused")
-    Object dummy = o;
   }
 
   private static Ref reserve(Ref ref, Ref reservation) {
