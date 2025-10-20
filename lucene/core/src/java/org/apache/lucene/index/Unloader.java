@@ -20,6 +20,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
 import java.io.IOException;
 import java.io.PrintStream;
+import java.io.UncheckedIOException;
 import java.lang.ref.ReferenceQueue;
 import java.lang.ref.WeakReference;
 import java.nio.charset.StandardCharsets;
@@ -765,81 +766,101 @@ public class Unloader<T extends Closeable> implements Closeable {
     }
   }
 
-  static PointValues.PointTree wrap(PointValues.PointTree pt, Consumer<Object> registerRef) {
-    PointValues.PointTree ret =
-        new PointValues.PointTree() {
-          @Override
-          public PointValues.PointTree clone() {
-            return wrap(pt.clone(), registerRef);
-          }
+  static PointValues.PointTree wrap(PointValues.PointTree pt, RefTracker registerRef)
+      throws IOException {
+    return registerRef.trackedInstance(
+        () ->
+            new PointValues.PointTree() {
+              @Override
+              public PointValues.PointTree clone() {
+                try {
+                  return wrap(pt.clone(), registerRef);
+                } catch (IOException e) {
+                  throw new UncheckedIOException("this should never happen", e);
+                }
+              }
 
-          @Override
-          public boolean moveToChild() throws IOException {
-            return pt.moveToChild();
-          }
+              @Override
+              public boolean moveToChild() throws IOException {
+                return pt.moveToChild();
+              }
 
-          @Override
-          public boolean moveToSibling() throws IOException {
-            return pt.moveToSibling();
-          }
+              @Override
+              public boolean moveToSibling() throws IOException {
+                return pt.moveToSibling();
+              }
 
-          @Override
-          public boolean moveToParent() throws IOException {
-            return pt.moveToParent();
-          }
+              @Override
+              public boolean moveToParent() throws IOException {
+                return pt.moveToParent();
+              }
 
-          @Override
-          public byte[] getMinPackedValue() {
-            return pt.getMinPackedValue();
-          }
+              @Override
+              public byte[] getMinPackedValue() {
+                return pt.getMinPackedValue();
+              }
 
-          @Override
-          public byte[] getMaxPackedValue() {
-            return pt.getMaxPackedValue();
-          }
+              @Override
+              public byte[] getMaxPackedValue() {
+                return pt.getMaxPackedValue();
+              }
 
-          @Override
-          public long size() {
-            return pt.size();
-          }
+              @Override
+              public long size() {
+                return pt.size();
+              }
 
-          @Override
-          public void visitDocIDs(PointValues.IntersectVisitor visitor) throws IOException {
-            pt.visitDocIDs(visitor);
-          }
+              @Override
+              public void visitDocIDs(PointValues.IntersectVisitor visitor) throws IOException {
+                pt.visitDocIDs(visitor);
+              }
 
-          @Override
-          public void visitDocValues(PointValues.IntersectVisitor visitor) throws IOException {
-            pt.visitDocValues(visitor);
-          }
-        };
-    registerRef.accept(ret);
-    return ret;
+              @Override
+              public void visitDocValues(PointValues.IntersectVisitor visitor) throws IOException {
+                pt.visitDocValues(visitor);
+              }
+            });
   }
 
-  static TermsEnum wrap(TermsEnum te, Consumer<Object> registerRef) {
-    TermsEnum ret =
-        new FilterLeafReader.FilterTermsEnum(te) {
-          @Override
-          public PostingsEnum postings(PostingsEnum reuse, int flags) throws IOException {
-            PostingsEnum ret = super.postings(reuse, flags);
-            registerRef.accept(ret);
-            return ret;
-          }
+  static TermsEnum wrap(TermsEnum te, RefTracker registerRef) throws IOException {
+    return registerRef.trackedInstance(
+        () ->
+            new FilterLeafReader.FilterTermsEnum(te) {
+              @Override
+              public PostingsEnum postings(PostingsEnum reuse, int flags) throws IOException {
+                return registerRef.trackedInstance(() -> super.postings(reuse, flags));
+              }
 
-          @Override
-          public ImpactsEnum impacts(int flags) throws IOException {
-            ImpactsEnum ret = super.impacts(flags);
-            registerRef.accept(ret);
-            return ret;
-          }
-        };
-    registerRef.accept(ret);
-    return ret;
+              @Override
+              public ImpactsEnum impacts(int flags) throws IOException {
+                return registerRef.trackedInstance(() -> super.impacts(flags));
+              }
+            });
+  }
+
+  static final class RefTracker {
+    private final AtomicInteger refCount;
+
+    private RefTracker(AtomicInteger refCount) {
+      this.refCount = refCount;
+    }
+
+    <T> T trackedInstance(IOSupplier<T> supplier) throws IOException {
+      refCount.getAndUpdate(ACQUIRE);
+      T ret;
+      try {
+        ret = supplier.get();
+      } catch (Throwable t) {
+        refCount.getAndUpdate(RELEASE);
+        throw t;
+      }
+      add(ret, refCount);
+      return ret;
+    }
   }
 
   interface RefTrackShim<V> {
-    V shim(V in, Consumer<Object> registerRef);
+    V shim(V in, RefTracker refTracker);
   }
 
   <K, V> V execute(FPIOFunction<T, K, V> function, K arg) throws IOException {
@@ -854,15 +875,7 @@ public class Unloader<T extends Closeable> implements Closeable {
       } else {
         AtomicInteger refCount = active.refCount;
         refCount.getAndUpdate(ACQUIRE);
-        ret =
-            shim == null
-                ? ret
-                : shim.shim(
-                    ret,
-                    (v) -> {
-                      refCount.getAndUpdate(ACQUIRE);
-                      add(v, refCount);
-                    });
+        ret = shim == null ? ret : shim.shim(ret, new RefTracker(refCount));
         add(ret, refCount);
         return ret;
       }
