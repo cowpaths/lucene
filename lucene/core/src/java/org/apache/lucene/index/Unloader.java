@@ -771,74 +771,70 @@ public class Unloader<T extends Closeable> implements Closeable {
 
   static PointValues.PointTree wrap(PointValues.PointTree pt, RefTracker registerRef)
       throws IOException {
-    return registerRef.trackedInstance(
-        () ->
-            new PointValues.PointTree() {
-              @Override
-              public PointValues.PointTree clone() {
-                try {
-                  return wrap(pt.clone(), registerRef);
-                } catch (IOException e) {
-                  throw new UncheckedIOException("this should never happen", e);
-                }
-              }
+    return new PointValues.PointTree() {
+      @Override
+      public PointValues.PointTree clone() {
+        try {
+          return wrap(registerRef.trackedInstance(pt::clone), registerRef);
+        } catch (IOException e) {
+          throw new UncheckedIOException("this should never happen", e);
+        }
+      }
 
-              @Override
-              public boolean moveToChild() throws IOException {
-                return pt.moveToChild();
-              }
+      @Override
+      public boolean moveToChild() throws IOException {
+        return pt.moveToChild();
+      }
 
-              @Override
-              public boolean moveToSibling() throws IOException {
-                return pt.moveToSibling();
-              }
+      @Override
+      public boolean moveToSibling() throws IOException {
+        return pt.moveToSibling();
+      }
 
-              @Override
-              public boolean moveToParent() throws IOException {
-                return pt.moveToParent();
-              }
+      @Override
+      public boolean moveToParent() throws IOException {
+        return pt.moveToParent();
+      }
 
-              @Override
-              public byte[] getMinPackedValue() {
-                return pt.getMinPackedValue();
-              }
+      @Override
+      public byte[] getMinPackedValue() {
+        return pt.getMinPackedValue();
+      }
 
-              @Override
-              public byte[] getMaxPackedValue() {
-                return pt.getMaxPackedValue();
-              }
+      @Override
+      public byte[] getMaxPackedValue() {
+        return pt.getMaxPackedValue();
+      }
 
-              @Override
-              public long size() {
-                return pt.size();
-              }
+      @Override
+      public long size() {
+        return pt.size();
+      }
 
-              @Override
-              public void visitDocIDs(PointValues.IntersectVisitor visitor) throws IOException {
-                pt.visitDocIDs(visitor);
-              }
+      @Override
+      public void visitDocIDs(PointValues.IntersectVisitor visitor) throws IOException {
+        pt.visitDocIDs(visitor);
+      }
 
-              @Override
-              public void visitDocValues(PointValues.IntersectVisitor visitor) throws IOException {
-                pt.visitDocValues(visitor);
-              }
-            });
+      @Override
+      public void visitDocValues(PointValues.IntersectVisitor visitor) throws IOException {
+        pt.visitDocValues(visitor);
+      }
+    };
   }
 
   static TermsEnum wrap(TermsEnum te, RefTracker registerRef) throws IOException {
-    return registerRef.trackedInstance(
-        () ->
-            new FilterLeafReader.FilterTermsEnum(te) {
-              @Override
-              public PostingsEnum postings(PostingsEnum reuse, int flags) throws IOException {
-                return registerRef.trackedInstance(() -> super.postings(reuse, flags));
-              }
+    return new FilterLeafReader.FilterTermsEnum(te) {
+      @Override
+      public PostingsEnum postings(PostingsEnum reuse, int flags) throws IOException {
+        return registerRef.trackedInstance(() -> super.postings(reuse, flags));
+      }
 
-              @Override
-              public ImpactsEnum impacts(int flags) throws IOException {
-                return registerRef.trackedInstance(() -> super.impacts(flags));
-              }
-            });
+      @Override
+      public ImpactsEnum impacts(int flags) throws IOException {
+        return registerRef.trackedInstance(() -> super.impacts(flags));
+      }
+    };
   }
 
   static final class RefTracker {
@@ -878,8 +874,8 @@ public class Unloader<T extends Closeable> implements Closeable {
       } else {
         AtomicInteger refCount = active.refCount;
         refCount.getAndUpdate(ACQUIRE);
-        ret = shim == null ? ret : shim.shim(ret, new RefTracker(refCount));
         add(ret, refCount);
+        ret = shim == null ? ret : shim.shim(ret, new RefTracker(refCount));
         return ret;
       }
     } finally {

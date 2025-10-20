@@ -111,13 +111,15 @@ public class UnloadingFieldsProducer extends FieldsProducer {
           return new FilterLeafReader.FilterTerms(rawTerms) {
             @Override
             public TermsEnum iterator() throws IOException {
-              return Unloader.wrap(super.iterator(), registerRef);
+              return Unloader.wrap(registerRef.trackedInstance(super::iterator), registerRef);
             }
 
             @Override
             public TermsEnum intersect(CompiledAutomaton compiled, BytesRef startTerm)
                 throws IOException {
-              return Unloader.wrap(super.intersect(compiled, startTerm), registerRef);
+              return Unloader.wrap(
+                  registerRef.trackedInstance(() -> super.intersect(compiled, startTerm)),
+                  registerRef);
             }
           };
         });

@@ -92,12 +92,13 @@ public class UnloadingDocValuesProducer extends DocValuesProducer {
           return new FilterSortedDocValues(rawSorted) {
             @Override
             public TermsEnum intersect(CompiledAutomaton automaton) throws IOException {
-              return Unloader.wrap(super.intersect(automaton), registerRef);
+              return Unloader.wrap(
+                  registerRef.trackedInstance(() -> super.intersect(automaton)), registerRef);
             }
 
             @Override
             public TermsEnum termsEnum() throws IOException {
-              return Unloader.wrap(super.termsEnum(), registerRef);
+              return Unloader.wrap(registerRef.trackedInstance(super::termsEnum), registerRef);
             }
           };
         });
@@ -124,12 +125,13 @@ public class UnloadingDocValuesProducer extends DocValuesProducer {
           return new FilterSortedSetDocValues(rawSorted) {
             @Override
             public TermsEnum intersect(CompiledAutomaton automaton) throws IOException {
-              return Unloader.wrap(super.intersect(automaton), registerRef);
+              return Unloader.wrap(
+                  registerRef.trackedInstance(() -> super.intersect(automaton)), registerRef);
             }
 
             @Override
             public TermsEnum termsEnum() throws IOException {
-              return Unloader.wrap(super.termsEnum(), registerRef);
+              return Unloader.wrap(registerRef.trackedInstance(super::termsEnum), registerRef);
             }
           };
         });

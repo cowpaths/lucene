@@ -75,7 +75,8 @@ public class UnloadingPointsReader extends PointsReader {
           return new PointValues() {
             @Override
             public PointTree getPointTree() throws IOException {
-              return Unloader.wrap(rawPointValues.getPointTree(), registerRef);
+              return Unloader.wrap(
+                  registerRef.trackedInstance(rawPointValues::getPointTree), registerRef);
             }
 
             @Override
