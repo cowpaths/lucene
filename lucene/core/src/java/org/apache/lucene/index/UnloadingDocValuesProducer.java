@@ -87,6 +87,7 @@ public class UnloadingDocValuesProducer extends DocValuesProducer {
     return u.execute(
         getSorted,
         field,
+        true,
         (rawSorted, registerRef) -> {
           // wrap so that we can track refs for returned `TermsEnum` instances
           return new FilterSortedDocValues(rawSorted) {
@@ -120,6 +121,7 @@ public class UnloadingDocValuesProducer extends DocValuesProducer {
     return u.execute(
         getSortedSet,
         field,
+        true,
         (rawSorted, registerRef) -> {
           // wrap so that we can track refs for returned `TermsEnum` instances
           return new FilterSortedSetDocValues(rawSorted) {

@@ -20,6 +20,7 @@ import static org.apache.lucene.index.Unloader.FPIOFunction;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.lang.ref.Reference;
 import java.util.Iterator;
 import org.apache.lucene.codecs.DocValuesProducer;
 import org.apache.lucene.codecs.FieldsProducer;
@@ -99,6 +100,7 @@ public class UnloadingFieldsProducer extends FieldsProducer {
     return u.execute(
         terms,
         field,
+        false,
         (rawTerms, registerRef) -> {
           // NOTE: we have to wrap here because a reference to the raw value may be
           // retained internal to the backing `FieldsProducer`. This can generate a
@@ -111,15 +113,122 @@ public class UnloadingFieldsProducer extends FieldsProducer {
           return new FilterLeafReader.FilterTerms(rawTerms) {
             @Override
             public TermsEnum iterator() throws IOException {
-              return Unloader.wrap(registerRef.trackedInstance(super::iterator), registerRef);
+              try {
+                return Unloader.wrap(registerRef.trackedInstance(super::iterator), registerRef);
+              } finally {
+                Reference.reachabilityFence(this);
+              }
             }
 
             @Override
             public TermsEnum intersect(CompiledAutomaton compiled, BytesRef startTerm)
                 throws IOException {
-              return Unloader.wrap(
-                  registerRef.trackedInstance(() -> super.intersect(compiled, startTerm)),
-                  registerRef);
+              try {
+                return Unloader.wrap(
+                    registerRef.trackedInstance(() -> super.intersect(compiled, startTerm)),
+                    registerRef);
+              } finally {
+                Reference.reachabilityFence(this);
+              }
+            }
+
+            @Override
+            public long size() throws IOException {
+              try {
+                return super.size();
+              } finally {
+                Reference.reachabilityFence(this);
+              }
+            }
+
+            @Override
+            public long getSumTotalTermFreq() throws IOException {
+              try {
+                return super.getSumTotalTermFreq();
+              } finally {
+                Reference.reachabilityFence(this);
+              }
+            }
+
+            @Override
+            public long getSumDocFreq() throws IOException {
+              try {
+                return super.getSumDocFreq();
+              } finally {
+                Reference.reachabilityFence(this);
+              }
+            }
+
+            @Override
+            public int getDocCount() throws IOException {
+              try {
+                return super.getDocCount();
+              } finally {
+                Reference.reachabilityFence(this);
+              }
+            }
+
+            @Override
+            public boolean hasFreqs() {
+              try {
+                return super.hasFreqs();
+              } finally {
+                Reference.reachabilityFence(this);
+              }
+            }
+
+            @Override
+            public boolean hasOffsets() {
+              try {
+                return super.hasOffsets();
+              } finally {
+                Reference.reachabilityFence(this);
+              }
+            }
+
+            @Override
+            public boolean hasPositions() {
+              try {
+                return super.hasPositions();
+              } finally {
+                Reference.reachabilityFence(this);
+              }
+            }
+
+            @Override
+            public boolean hasPayloads() {
+              try {
+                return super.hasPayloads();
+              } finally {
+                Reference.reachabilityFence(this);
+              }
+            }
+
+            @Override
+            public Object getStats() throws IOException {
+              try {
+                return super.getStats();
+              } finally {
+                Reference.reachabilityFence(this);
+              }
+            }
+
+            @Override
+            public BytesRef getMin() throws IOException {
+              try {
+                return super.getMin();
+              } finally {
+                Reference.reachabilityFence(this);
+              }
+            }
+
+            @Override
+            public BytesRef getMax() throws IOException {
+              try {
+                return super.getMax();
+              } finally {
+                Reference.reachabilityFence(this);
+              }
             }
           };
         });

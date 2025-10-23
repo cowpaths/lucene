@@ -80,6 +80,8 @@ public class Unloader<T extends Closeable> implements Closeable {
     private final boolean unloading;
     private final WeakReference<DelegateFuture<T>> prev;
     private final AtomicInteger refCount;
+
+    @SuppressWarnings("unused")
     private volatile T strongRef;
 
     @SuppressWarnings("unused")
@@ -863,19 +865,35 @@ public class Unloader<T extends Closeable> implements Closeable {
   }
 
   <K, V> V execute(FPIOFunction<T, K, V> function, K arg) throws IOException {
-    return execute(function, arg, null);
+    return execute(function, arg, true, null);
   }
 
-  <K, V> V execute(FPIOFunction<T, K, V> function, K arg, RefTrackShim<V> shim) throws IOException {
+  /**
+   * <code>trackRaw</code> deserves special explanation: where possible, we want to track the raw
+   * instance, not the shimmed instance. There is an exception however (e.g. for {@link
+   * PointsReader#getValues(String)} and {@link FieldsProducer#terms(String)}), where shared
+   * instances may be returned. In order to leverage refcounting to determine when a resource is
+   * eligible for unloading, in such cases we must register/track the reference of our one-off
+   * shim/wrapper instance.
+   *
+   * <p>When this method is called with <code>trackRaw=false</code>, the shim implementation should
+   * (out of an abundance of caution) override all methods to wrap with <code>try/finally</code> and
+   * call {@link Reference#reachabilityFence(Object)} in the <code>finally</code> block; i.e.:
+   * <code>Reference.reachabilityFence(this)</code>. This will prevent dead reference analysis from
+   * collecting the wrapper and unloading the resource after entering the shim method, but before
+   * completing the call to the raw/backing method.
+   */
+  <K, V> V execute(FPIOFunction<T, K, V> function, K arg, boolean trackRaw, RefTrackShim<V> shim)
+      throws IOException {
     try (CloseableVal<T> active = backing()) {
-      V ret = function.apply(active.get(), arg);
-      if (ret == null) {
+      V raw = function.apply(active.get(), arg);
+      if (raw == null) {
         return null;
       } else {
         AtomicInteger refCount = active.refCount;
         refCount.getAndUpdate(ACQUIRE);
-        add(ret, refCount);
-        ret = shim == null ? ret : shim.shim(ret, new RefTracker(refCount));
+        V ret = shim == null ? raw : shim.shim(raw, new RefTracker(refCount));
+        add(trackRaw ? raw : ret, refCount);
         return ret;
       }
     } finally {
@@ -1111,6 +1129,21 @@ public class Unloader<T extends Closeable> implements Closeable {
         removeOutstanding, REF_REMOVER, EXTERNAL_REFQUEUE_HANDLING, OUTSTANDING_SIZE_SUPPLIER);
   }
 
+  /**
+   * Returns a {@link PointsReader} over the specified {@link SegmentReadState}, conditionally
+   * wrapped to allow dynamic unloading and on-demand reloading of the backing resource.
+   *
+   * <p>The backing resource is initially loaded, and will be reloaded if applicable, via the
+   * provided `open` {@link IOSupplier}. The {@link Directory} is passed only to be used as an
+   * {@link UnloaderCoordinationPoint}.
+   *
+   * <p>NOTE: the segment files specified by {@link SegmentReadState}, which must be present upon
+   * initialization, must still be accessible on disk if/when the backing resource is reloaded
+   * (after having been unloaded). In practice, this means that {@link
+   * IndexWriter#incRefDeleter(SegmentInfos)} must have been called for the {@link SegmentInfos}
+   * associated with the specified {@link SegmentReadState}. This happens organically in many
+   * contexts, but not all -- particularly in tests.
+   */
   public static PointsReader pointsReader(
       IOSupplier<PointsReader> open, Directory dir, SegmentReadState srs) throws IOException {
     UnloadHelper unloadHelper;

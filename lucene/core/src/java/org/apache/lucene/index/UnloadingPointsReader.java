@@ -19,6 +19,7 @@ package org.apache.lucene.index;
 import static org.apache.lucene.index.Unloader.FPIOFunction;
 
 import java.io.IOException;
+import java.lang.ref.Reference;
 import org.apache.lucene.codecs.DocValuesProducer;
 import org.apache.lucene.codecs.PointsReader;
 import org.apache.lucene.util.IOFunction;
@@ -70,48 +71,81 @@ public class UnloadingPointsReader extends PointsReader {
     return u.execute(
         getValues,
         field,
+        false,
         (rawPointValues, registerRef) -> {
           // NOTE: we have to wrap here in order to track derived `PointTree` instances
           return new PointValues() {
             @Override
             public PointTree getPointTree() throws IOException {
-              return Unloader.wrap(
-                  registerRef.trackedInstance(rawPointValues::getPointTree), registerRef);
+              try {
+                return Unloader.wrap(
+                    registerRef.trackedInstance(rawPointValues::getPointTree), registerRef);
+              } finally {
+                Reference.reachabilityFence(this);
+              }
             }
 
             @Override
             public byte[] getMinPackedValue() throws IOException {
-              return rawPointValues.getMinPackedValue();
+              try {
+                return rawPointValues.getMinPackedValue();
+              } finally {
+                Reference.reachabilityFence(this);
+              }
             }
 
             @Override
             public byte[] getMaxPackedValue() throws IOException {
-              return rawPointValues.getMaxPackedValue();
+              try {
+                return rawPointValues.getMaxPackedValue();
+              } finally {
+                Reference.reachabilityFence(this);
+              }
             }
 
             @Override
             public int getNumDimensions() throws IOException {
-              return rawPointValues.getNumDimensions();
+              try {
+                return rawPointValues.getNumDimensions();
+              } finally {
+                Reference.reachabilityFence(this);
+              }
             }
 
             @Override
             public int getNumIndexDimensions() throws IOException {
-              return rawPointValues.getNumIndexDimensions();
+              try {
+                return rawPointValues.getNumIndexDimensions();
+              } finally {
+                Reference.reachabilityFence(this);
+              }
             }
 
             @Override
             public int getBytesPerDimension() throws IOException {
-              return rawPointValues.getBytesPerDimension();
+              try {
+                return rawPointValues.getBytesPerDimension();
+              } finally {
+                Reference.reachabilityFence(this);
+              }
             }
 
             @Override
             public long size() {
-              return rawPointValues.size();
+              try {
+                return rawPointValues.size();
+              } finally {
+                Reference.reachabilityFence(this);
+              }
             }
 
             @Override
             public int getDocCount() {
-              return rawPointValues.getDocCount();
+              try {
+                return rawPointValues.getDocCount();
+              } finally {
+                Reference.reachabilityFence(this);
+              }
             }
           };
         });
