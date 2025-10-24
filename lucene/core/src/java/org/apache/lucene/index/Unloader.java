@@ -669,6 +669,14 @@ public class Unloader<T extends Closeable> implements Closeable {
   private static final int DEFAULT_PARALLEL_HEAD_FACTOR = 32;
   private static final int PARALLEL_HEAD_FACTOR;
 
+  /**
+   * Setting this to false ensures even (round-robin) utilization of refqueues. Assigning by thread
+   * is fine at the time of refqueue <i>assignment</i>, but can yield hotspots that could increase
+   * thread contention at time of ref collection (by GC threads).
+   */
+  private static final boolean ASSIGN_REFQUEUE_BY_THREAD =
+      !"false".equals(System.getProperty("lucene.unload.assignRefQueueByThread"));
+
   static {
     List<String> deferred = DEFERRED_INIT_MESSAGES.get();
     String spec = System.getProperty("lucene.unload.parallelRefQueueCount");
@@ -690,6 +698,8 @@ public class Unloader<T extends Closeable> implements Closeable {
       PARALLEL_HEAD_FACTOR = v;
     }
     deferred.add("INFO: set static property PARALLEL_HEAD_FACTOR=" + PARALLEL_HEAD_FACTOR);
+    deferred.add(
+        "INFO: set static property ASSIGN_REFQUEUE_BY_THREAD=" + ASSIGN_REFQUEUE_BY_THREAD);
   }
 
   private static final int PARALLEL_HEAD_MASK = PARALLEL_HEAD_FACTOR - 1;
@@ -738,8 +748,15 @@ public class Unloader<T extends Closeable> implements Closeable {
   private static final Ref RESERVED = new Ref(null, null, null, null);
   private static final Ref REMOVED = new Ref(null, null, null, null);
 
+  private static final AtomicInteger ARBITRARY_REFQUEUE = new AtomicInteger();
+
   private static void add(final Object o, AtomicInteger refCount) {
-    int parallelIdx = Thread.currentThread().hashCode() & PARALLEL_HEAD_MASK;
+    int parallelIdx;
+    if (ASSIGN_REFQUEUE_BY_THREAD) {
+      parallelIdx = Thread.currentThread().hashCode() & PARALLEL_HEAD_MASK;
+    } else {
+      parallelIdx = ARBITRARY_REFQUEUE.getAndIncrement() & PARALLEL_HEAD_MASK;
+    }
     OUTSTANDING_SIZE.increment();
     if (EXTERNAL_REFQUEUE_HANDLING.get() != Boolean.TRUE) drainRemoveOutstanding();
     Ref head = HEAD[parallelIdx];
