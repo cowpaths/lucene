@@ -663,7 +663,35 @@ public class Unloader<T extends Closeable> implements Closeable {
         }
       };
 
-  private static final int PARALLEL_HEAD_FACTOR = 32;
+  private static final AtomicReference<List<String>> DEFERRED_INIT_MESSAGES =
+      new AtomicReference<>(new ArrayList<>());
+
+  private static final int DEFAULT_PARALLEL_HEAD_FACTOR = 32;
+  private static final int PARALLEL_HEAD_FACTOR;
+
+  static {
+    List<String> deferred = DEFERRED_INIT_MESSAGES.get();
+    String spec = System.getProperty("lucene.unload.parallelRefQueueCount");
+    if (spec == null) {
+      PARALLEL_HEAD_FACTOR = DEFAULT_PARALLEL_HEAD_FACTOR;
+    } else {
+      int v;
+      try {
+        v = Integer.parseInt(spec);
+        if (v < 1 || Integer.bitCount(v) != 1) {
+          deferred.add("WARN: bad lucene.unload.parallelRefQueueCount spec: " + spec);
+          v = DEFAULT_PARALLEL_HEAD_FACTOR;
+        }
+      } catch (Throwable t) {
+        deferred.add(
+            "WARN: bad lucene.unload.parallelRefQueueCount spec: " + spec + " (" + t + ")");
+        v = DEFAULT_PARALLEL_HEAD_FACTOR;
+      }
+      PARALLEL_HEAD_FACTOR = v;
+    }
+    deferred.add("INFO: set static property PARALLEL_HEAD_FACTOR=" + PARALLEL_HEAD_FACTOR);
+  }
+
   private static final int PARALLEL_HEAD_MASK = PARALLEL_HEAD_FACTOR - 1;
 
   @SuppressWarnings({"unchecked", "rawtypes"})
@@ -949,9 +977,6 @@ public class Unloader<T extends Closeable> implements Closeable {
   static {
     DISABLE = "true".equals(System.getProperty("lucene.unload.disable"));
   }
-
-  private static final AtomicReference<List<String>> DEFERRED_INIT_MESSAGES =
-      new AtomicReference<>(new ArrayList<>());
 
   static {
     List<String> deferred = DEFERRED_INIT_MESSAGES.get();
