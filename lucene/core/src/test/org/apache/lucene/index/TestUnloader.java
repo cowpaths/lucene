@@ -22,6 +22,7 @@ import java.lang.ref.ReferenceQueue;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -35,6 +36,8 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.function.Consumer;
 import java.util.function.LongSupplier;
+import org.apache.lucene.index.Unloader.BlockingRunnable;
+import org.apache.lucene.index.Unloader.HoldingFlusher;
 import org.apache.lucene.store.AlreadyClosedException;
 import org.apache.lucene.tests.util.LuceneTestCase;
 import org.apache.lucene.util.IOFunction;
@@ -243,6 +246,8 @@ public class TestUnloader extends LuceneTestCase {
     final int batchSize = 1024;
     @SuppressWarnings({"unchecked", "rawtypes"})
     Consumer<Object>[] registerRef = new Consumer[1];
+    HoldingFlusher[] flushHolder = new HoldingFlusher[1];
+    LongSupplier[] holdingSizeHolder = new LongSupplier[1];
     LongSupplier[] outstandingSizeHolder = new LongSupplier[1];
     @SuppressWarnings({"unchecked", "rawtypes"})
     ReferenceQueue<Object>[][] removeOutstandingHolder = new ReferenceQueue[1][];
@@ -259,24 +264,30 @@ public class TestUnloader extends LuceneTestCase {
           public void maybeHandleRefQueues(
               ReferenceQueue<Object>[] queues,
               Consumer<Object> handler,
+              HoldingFlusher flushHolding,
               AtomicReference<Boolean> handleRefQueue,
+              LongSupplier holdingSize,
               LongSupplier outstandingSize) {
             handleRefQueue.set(true);
             handleRefQueueHolder[0] = handleRefQueue;
             registerRef[0] = handler;
+            flushHolder[0] = flushHolding;
+            holdingSizeHolder[0] = holdingSize;
             outstandingSizeHolder[0] = outstandingSize;
             removeOutstandingHolder[0] = queues;
           }
         });
     ReferenceQueue<Object>[] queues = removeOutstandingHolder[0];
+    HoldingFlusher flush = flushHolder[0];
     AtomicReference<Boolean> handleRefQueue = handleRefQueueHolder[0];
     Consumer<Object> handler = registerRef[0];
+    LongSupplier holdingSize = holdingSizeHolder[0];
     LongSupplier outstandingSize = outstandingSizeHolder[0];
 
     int PARALLEL_HEAD_FACTOR = queues.length;
     ExecutorService exec =
         Executors.newFixedThreadPool(
-            nThreads + PARALLEL_HEAD_FACTOR, new NamedThreadFactory("TestUnloader"));
+            nThreads + PARALLEL_HEAD_FACTOR << 1, new NamedThreadFactory("TestUnloader"));
     AtomicBoolean finished = new AtomicBoolean();
     @SuppressWarnings("rawtypes")
     Future<?>[] futures = new Future[nThreads];
@@ -302,49 +313,46 @@ public class TestUnloader extends LuceneTestCase {
               });
     }
     LongAdder activeRefQueueProcessors = new LongAdder();
+    LongAdder collectedHoldingRefs = new LongAdder();
     LongAdder collectedRefs = new LongAdder();
     @SuppressWarnings("rawtypes")
-    Future<?>[] refQueueFutures = new Future[queues.length];
+    Future<?>[] refQueueFutures = new Future[queues.length << 1];
     for (int i = queues.length - 1; i >= 0; i--) {
       ReferenceQueue<Object> q = queues[i];
       refQueueFutures[i] =
           exec.submit(
-              () -> {
-                activeRefQueueProcessors.increment();
-                try {
-                  while (handleRefQueue.get() == Boolean.TRUE) {
+              wrapTask(
+                  handleRefQueue,
+                  activeRefQueueProcessors,
+                  () -> {
                     handler.accept(q.remove());
                     collectedRefs.increment();
-                  }
-                } catch (InterruptedException ex) {
-                  if (handleRefQueue.get() == Boolean.TRUE) {
-                    // unexpected -- we've been interrupted but are still
-                    // supposed to be handling ref queue?
-                    handleRefQueue.set(false);
-                    System.err.println("unexpected interruption of ref queue processing");
-                    ex.printStackTrace(System.err);
-                    throw ex;
-                  }
-                } catch (Throwable t) {
-                  handleRefQueue.set(false);
-                  System.err.println("exception in ref queue processing");
-                  t.printStackTrace(System.err);
-                  throw t;
-                } finally {
-                  activeRefQueueProcessors.decrement();
-                }
-                return null;
-              });
+                  }));
+      long[] nextHoldUntil = new long[] {System.nanoTime()};
+      int idx = i;
+      refQueueFutures[queues.length + i] =
+          exec.submit(
+              wrapTask(
+                  handleRefQueue,
+                  activeRefQueueProcessors,
+                  () -> {
+                    collectedHoldingRefs.add(flush.flush(nextHoldUntil[0], idx, nextHoldUntil));
+                  }));
     }
     long endNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(N_SECONDS);
     long remainingNanos;
     while ((remainingNanos = endNanos - System.nanoTime()) > 0) {
       long sz = outstandingSize.getAsLong();
+      long hSz = holdingSize.getAsLong();
       System.out.println(
           "seconds remaining: "
               + TimeUnit.NANOSECONDS.toSeconds(remainingNanos)
+              + ", holdingSize="
+              + RamUsageEstimator.humanReadableUnits(hSz * Unloader.RAMBYTES_PER_HOLDINGREF)
               + ", outstandingSize="
               + sz
+              + ", active="
+              + activeRefQueueProcessors.sum()
               + " ("
               + RamUsageEstimator.humanReadableUnits(sz * Unloader.RAMBYTES_PER_REF)
               + ")");
@@ -360,7 +368,10 @@ public class TestUnloader extends LuceneTestCase {
     start = System.nanoTime();
     int gcIterations = 0;
     long sz;
-    while ((sz = outstandingSize.getAsLong()) > 0 || Unloader.nonEmptyRefQueueHeadCount() > 0) {
+    long hSz;
+    while ((hSz = holdingSize.getAsLong()) + (sz = outstandingSize.getAsLong()) > 0
+        || Unloader.nonEmptyRefQueueHeadCount() > 0
+        || Unloader.nonEmptyHoldingHeadCount() > 0) {
       gcIterations++;
       System.gc();
       Thread.sleep(250);
@@ -369,10 +380,16 @@ public class TestUnloader extends LuceneTestCase {
               + gcIterations
               + ", "
               + TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start)
+              + ", holdingSize="
+              + RamUsageEstimator.humanReadableUnits(hSz * Unloader.RAMBYTES_PER_HOLDINGREF)
               + ", outstandingSize="
               + sz
+              + ", active="
+              + activeRefQueueProcessors.sum()
               + ", nonEmptyRefQueueHeadCount="
-              + Unloader.nonEmptyRefQueueHeadCount());
+              + Unloader.nonEmptyRefQueueHeadCount()
+              + ", nonEmptyHoldingHeadCount="
+              + Unloader.nonEmptyHoldingHeadCount());
       if (gcIterations > 40) {
         fail("failed to converge");
       }
@@ -382,19 +399,65 @@ public class TestUnloader extends LuceneTestCase {
       refQueueFutures[i].cancel(true);
     }
     for (int i = refQueueFutures.length - 1; i >= 0; i--) {
-      int idx = i;
-      expectThrows(CancellationException.class, () -> refQueueFutures[idx].get());
+      try {
+        refQueueFutures[i].get();
+      } catch (
+          @SuppressWarnings("unused")
+          CancellationException ex) {
+        // this is ok.
+        // NOTE: we can't do `expectThrows()` because depending on where
+        // the task is in the loop, it might exit _without_ `CancellationException`.
+      }
     }
     exec.shutdown();
+    assertTrue(exec.awaitTermination(60, TimeUnit.SECONDS));
     long createdSum = total.sum();
     long collectedSum = collectedRefs.sum();
-    assertEquals(createdSum, collectedSum);
+    long collectedHoldingSum = collectedHoldingRefs.sum();
+    assertEquals(createdSum, collectedSum + collectedHoldingSum);
     System.out.println(
         "success! "
             + TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start)
             + " millis; throughput="
             + (sum / N_SECONDS)
             + "/s");
-    System.out.println("total created=" + createdSum + ", collected=" + collectedSum);
+    System.out.println(
+        "total created="
+            + createdSum
+            + ", collectedHolding="
+            + collectedHoldingSum
+            + ", collected="
+            + collectedSum);
+  }
+
+  private static Callable<Void> wrapTask(
+      AtomicReference<Boolean> handleRefQueue,
+      LongAdder activeRefQueueProcessors,
+      BlockingRunnable r) {
+    return () -> {
+      activeRefQueueProcessors.increment();
+      try {
+        while (handleRefQueue.get() == Boolean.TRUE) {
+          r.run();
+        }
+      } catch (InterruptedException ex) {
+        if (handleRefQueue.get() == Boolean.TRUE) {
+          // unexpected -- we've been interrupted but are still
+          // supposed to be handling ref queue?
+          handleRefQueue.set(false);
+          System.err.println("unexpected interruption of ref queue processing");
+          ex.printStackTrace(System.err);
+          throw ex;
+        }
+      } catch (Throwable t) {
+        handleRefQueue.set(false);
+        System.err.println("exception in ref queue processing");
+        t.printStackTrace(System.err);
+        throw t;
+      } finally {
+        activeRefQueueProcessors.decrement();
+      }
+      return null;
+    };
   }
 }

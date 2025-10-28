@@ -34,6 +34,8 @@ allprojects {
           [propName: 'lucene.unload.executorPerDirectory', value: false, description: "Directory instances supply their own unloading executor"],
           [propName: 'lucene.unload.ttl', value: '60m', description: "Time since last use at which a resource becomes eligible for unloading"],
           [propName: 'lucene.unload.initial', value: '1m', description: "Extra time allotted for first resource use after load/reload"],
+          [propName: 'lucene.unload.holding', value: 'true', description: "Place refs in a \"holding area\" before fully tracking"],
+          [propName: 'lucene.unload.holdTargetMegabytes', value: '10', description: "Target size of pre-tracked ref \"holding area\""],
           // asserts, debug output.
           [propName: 'tests.verbose', value: false, description: "Enables verbose mode (emits full test outputs immediately)."],
           [propName: 'tests.workDir',
