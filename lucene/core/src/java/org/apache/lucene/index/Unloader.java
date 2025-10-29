@@ -21,6 +21,7 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.io.UncheckedIOException;
+import java.lang.ref.PhantomReference;
 import java.lang.ref.Reference;
 import java.lang.ref.ReferenceQueue;
 import java.lang.ref.WeakReference;
@@ -980,7 +981,7 @@ public class Unloader<T extends Closeable> implements Closeable {
   private static final int LOW_WATERMARK = HIGH_WATERMARK >> 1;
   private static final int FALLBACK_HIGH_WATERMARK = HIGH_WATERMARK + LOW_WATERMARK;
 
-  private static final class Ref extends WeakReference<Object> {
+  private static final class Ref extends PhantomReference<Object> {
     private final AtomicInteger refCount;
     private final AtomicReference<Ref> next = new AtomicReference<>();
     private volatile Ref prev;
@@ -990,6 +991,11 @@ public class Unloader<T extends Closeable> implements Closeable {
       super(referent, q);
       this.refCount = refCount;
       this.prev = prev;
+    }
+
+    @Override
+    public Object get() {
+      throw new UnsupportedOperationException("not supported");
     }
   }
 
