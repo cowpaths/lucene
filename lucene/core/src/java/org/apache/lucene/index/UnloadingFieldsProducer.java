@@ -20,7 +20,6 @@ import static org.apache.lucene.index.Unloader.FPIOFunction;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
-import java.lang.ref.Reference;
 import java.util.Iterator;
 import org.apache.lucene.codecs.DocValuesProducer;
 import org.apache.lucene.codecs.FieldsProducer;
@@ -86,7 +85,27 @@ public class UnloadingFieldsProducer extends FieldsProducer {
   @Override
   public Iterator<String> iterator() {
     try {
-      return u.execute(iterator, null);
+      return u.execute(
+          iterator,
+          null,
+          true,
+          (raw, refTracker) -> {
+            return new Iterator<String>() {
+              @Override
+              public boolean hasNext() {
+                return raw.hasNext();
+              }
+
+              @Override
+              public String next() {
+                try {
+                  return raw.next();
+                } finally {
+                  refTracker.ensureReachability();
+                }
+              }
+            };
+          });
     } catch (IOException e) {
       // this should never happen
       throw new UncheckedIOException(e);
@@ -101,7 +120,7 @@ public class UnloadingFieldsProducer extends FieldsProducer {
         terms,
         field,
         false,
-        (rawTerms, refCount) -> {
+        (rawTerms, registerRef) -> {
           // NOTE: we have to wrap here because a reference to the raw value may be
           // retained internal to the backing `FieldsProducer`. This can generate a
           // profusion of redundant references that never get collected. This is a
@@ -111,14 +130,12 @@ public class UnloadingFieldsProducer extends FieldsProducer {
           // This particular rationale for wrapping only applies to `Terms` -- other
           // resources are already created as one-offs.
           return new FilterLeafReader.FilterTerms(rawTerms) {
-            private final Unloader.RefTracker registerRef = new Unloader.RefTracker(this, refCount);
-
             @Override
             public TermsEnum iterator() throws IOException {
               try {
                 return Unloader.wrap(registerRef.trackedInstance(super::iterator), registerRef);
               } finally {
-                Reference.reachabilityFence(this);
+                registerRef.ensureReachability();
               }
             }
 
@@ -130,7 +147,7 @@ public class UnloadingFieldsProducer extends FieldsProducer {
                     registerRef.trackedInstance(() -> super.intersect(compiled, startTerm)),
                     registerRef);
               } finally {
-                Reference.reachabilityFence(this);
+                registerRef.ensureReachability();
               }
             }
 
@@ -139,7 +156,7 @@ public class UnloadingFieldsProducer extends FieldsProducer {
               try {
                 return super.size();
               } finally {
-                Reference.reachabilityFence(this);
+                registerRef.ensureReachability();
               }
             }
 
@@ -148,7 +165,7 @@ public class UnloadingFieldsProducer extends FieldsProducer {
               try {
                 return super.getSumTotalTermFreq();
               } finally {
-                Reference.reachabilityFence(this);
+                registerRef.ensureReachability();
               }
             }
 
@@ -157,7 +174,7 @@ public class UnloadingFieldsProducer extends FieldsProducer {
               try {
                 return super.getSumDocFreq();
               } finally {
-                Reference.reachabilityFence(this);
+                registerRef.ensureReachability();
               }
             }
 
@@ -166,7 +183,7 @@ public class UnloadingFieldsProducer extends FieldsProducer {
               try {
                 return super.getDocCount();
               } finally {
-                Reference.reachabilityFence(this);
+                registerRef.ensureReachability();
               }
             }
 
@@ -175,7 +192,7 @@ public class UnloadingFieldsProducer extends FieldsProducer {
               try {
                 return super.hasFreqs();
               } finally {
-                Reference.reachabilityFence(this);
+                registerRef.ensureReachability();
               }
             }
 
@@ -184,7 +201,7 @@ public class UnloadingFieldsProducer extends FieldsProducer {
               try {
                 return super.hasOffsets();
               } finally {
-                Reference.reachabilityFence(this);
+                registerRef.ensureReachability();
               }
             }
 
@@ -193,7 +210,7 @@ public class UnloadingFieldsProducer extends FieldsProducer {
               try {
                 return super.hasPositions();
               } finally {
-                Reference.reachabilityFence(this);
+                registerRef.ensureReachability();
               }
             }
 
@@ -202,7 +219,7 @@ public class UnloadingFieldsProducer extends FieldsProducer {
               try {
                 return super.hasPayloads();
               } finally {
-                Reference.reachabilityFence(this);
+                registerRef.ensureReachability();
               }
             }
 
@@ -211,7 +228,7 @@ public class UnloadingFieldsProducer extends FieldsProducer {
               try {
                 return super.getStats();
               } finally {
-                Reference.reachabilityFence(this);
+                registerRef.ensureReachability();
               }
             }
 
@@ -220,7 +237,7 @@ public class UnloadingFieldsProducer extends FieldsProducer {
               try {
                 return super.getMin();
               } finally {
-                Reference.reachabilityFence(this);
+                registerRef.ensureReachability();
               }
             }
 
@@ -229,7 +246,7 @@ public class UnloadingFieldsProducer extends FieldsProducer {
               try {
                 return super.getMax();
               } finally {
-                Reference.reachabilityFence(this);
+                registerRef.ensureReachability();
               }
             }
           };

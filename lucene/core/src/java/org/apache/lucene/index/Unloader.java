@@ -39,6 +39,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.LongAdder;
 import java.util.concurrent.locks.Condition;
@@ -86,6 +87,7 @@ public class Unloader<T extends Closeable> implements Closeable {
     private final boolean unloading;
     private final WeakReference<DelegateFuture<T>> prev;
     private final AtomicInteger refCount;
+    private final AtomicReference<WeakReference<Object>> sentinel;
 
     @SuppressWarnings("unused")
     private volatile T strongRef;
@@ -130,6 +132,7 @@ public class Unloader<T extends Closeable> implements Closeable {
       this.prev = new WeakReference<>(prev);
       if (unloading) {
         this.refCount = null;
+        this.sentinel = null;
         hardRef = prev;
         whenComplete(
             (r, e) -> {
@@ -142,6 +145,7 @@ public class Unloader<T extends Closeable> implements Closeable {
             });
       } else {
         refCount = new AtomicInteger(initialRefCount);
+        sentinel = new AtomicReference<>(INITIAL_SENTINEL);
       }
     }
 
@@ -169,6 +173,8 @@ public class Unloader<T extends Closeable> implements Closeable {
       strongRef = null;
     }
   }
+
+  private static final WeakReference<Object> INITIAL_SENTINEL = new WeakReference<>(null);
 
   @SuppressWarnings("unchecked")
   private final DelegateFuture<T> closedSentinel = (DelegateFuture<T>) CLOSED;
@@ -598,10 +604,13 @@ public class Unloader<T extends Closeable> implements Closeable {
 
     private final T val;
     private final AtomicInteger refCount;
+    private final AtomicReference<WeakReference<Object>> sentinel;
 
-    private CloseableVal(T val, AtomicInteger refCount) {
+    private CloseableVal(
+        T val, AtomicInteger refCount, AtomicReference<WeakReference<Object>> sentinel) {
       this.val = val;
       this.refCount = refCount;
+      this.sentinel = sentinel;
     }
 
     @Override
@@ -625,7 +634,7 @@ public class Unloader<T extends Closeable> implements Closeable {
     while (!weCompute[0]) {
       try {
         return new CloseableVal<>(
-            holder.getStrong(until - now, TimeUnit.NANOSECONDS), holder.refCount);
+            holder.getStrong(until - now, TimeUnit.NANOSECONDS), holder.refCount, holder.sentinel);
       } catch (ExecutionException e) {
         Throwable t = e.getCause();
         if (t instanceof IOException) {
@@ -648,7 +657,7 @@ public class Unloader<T extends Closeable> implements Closeable {
       candidate = reopen.apply(this);
       holder.completeStrong(candidate);
       successfullyComputed = true;
-      return new CloseableVal<>(candidate, holder.refCount);
+      return new CloseableVal<>(candidate, holder.refCount, holder.sentinel);
     } catch (Throwable t) {
       holder.completeExceptionally(t);
       throw t;
@@ -1133,7 +1142,7 @@ public class Unloader<T extends Closeable> implements Closeable {
         try {
           return pt.size();
         } finally {
-          registerRef.ensureTopLevelReachability();
+          registerRef.ensureReachability();
         }
       }
 
@@ -1162,7 +1171,7 @@ public class Unloader<T extends Closeable> implements Closeable {
       try {
         return super.cost();
       } finally {
-        registerRef.ensureTopLevelReachability();
+        registerRef.ensureReachability();
       }
     }
   }
@@ -1252,7 +1261,7 @@ public class Unloader<T extends Closeable> implements Closeable {
               try {
                 return raw.cost();
               } finally {
-                registerRef.ensureTopLevelReachability();
+                registerRef.ensureReachability();
               }
             }
           };
@@ -1297,13 +1306,13 @@ public class Unloader<T extends Closeable> implements Closeable {
      * block.
      */
     @SuppressWarnings("ReachabilityFenceUsage")
-    private void ensureTopLevelReachability() {
+    void ensureReachability() {
       Reference.reachabilityFence(topLevel);
     }
   }
 
   interface RefTrackShim<V> {
-    V shim(V in, AtomicInteger refCount);
+    V shim(V in, RefTracker refTracker);
   }
 
   <K, V> V execute(FPIOFunction<T, K, V> function, K arg) throws IOException {
@@ -1325,7 +1334,8 @@ public class Unloader<T extends Closeable> implements Closeable {
    * collecting the wrapper and unloading the resource after entering the shim method, but before
    * completing the call to the raw/backing method.
    */
-  <K, V> V execute(FPIOFunction<T, K, V> function, K arg, boolean trackRaw, RefTrackShim<V> shim)
+  <K, V> V execute(
+      FPIOFunction<T, K, V> function, K arg, boolean trackRawUnused, RefTrackShim<V> shim)
       throws IOException {
     try (CloseableVal<T> active = backing()) {
       V raw = function.apply(active.get(), arg);
@@ -1333,15 +1343,40 @@ public class Unloader<T extends Closeable> implements Closeable {
         return null;
       } else {
         AtomicInteger refCount = active.refCount;
-        refCount.getAndUpdate(ACQUIRE);
-        V ret = shim == null ? raw : shim.shim(raw, refCount);
-        add(trackRaw ? raw : ret, refCount);
-        return ret;
+        AtomicReference<WeakReference<Object>> sentinel = active.sentinel;
+        Object tracked;
+        // TODO: here we assume indirect tracking, so direct tracking won't really work anymore.
+        //  fix to make this consistent
+        boolean reusedSentinel = true;
+        final WeakReference<Object> initial = sentinel.get();
+        WeakReference<Object> weak = initial;
+        while ((tracked = weak.get()) == null) {
+          tracked = new Object();
+          WeakReference<Object> extant =
+              sentinel.compareAndExchange(weak, new WeakReference<>(tracked));
+          if (extant == weak) {
+            refCount.getAndUpdate(ACQUIRE);
+            add(tracked, refCount);
+            reusedSentinel = false;
+            break;
+          } else {
+            weak = extant;
+          }
+        }
+        if (reusedSentinel) {
+          INDIRECT_TRACK_COUNT.increment();
+        } else if (initial != INITIAL_SENTINEL && out.isEnabled("UN")) {
+          long extra = EXTRA_SENTINELS_CREATED.incrementAndGet();
+          out.message("UN", "INFO: total additional sentinels created: " + extra);
+        }
+        return shim.shim(raw, new RefTracker(tracked, refCount));
       }
     } finally {
       lastAccessNanos = System.nanoTime();
     }
   }
+
+  private static final AtomicLong EXTRA_SENTINELS_CREATED = new AtomicLong();
 
   interface FPIOFunction<T, K, V> {
     V apply(T fp, K arg) throws IOException;

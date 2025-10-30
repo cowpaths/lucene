@@ -68,7 +68,22 @@ public class UnloadingDocValuesProducer extends DocValuesProducer {
 
   @Override
   public NumericDocValues getNumeric(FieldInfo field) throws IOException {
-    return u.execute(getNumeric, field);
+    return u.execute(
+        getNumeric,
+        field,
+        true,
+        (raw, refTracker) -> {
+          return new FilterNumericDocValues(raw) {
+            @Override
+            public long cost() {
+              try {
+                return super.cost();
+              } finally {
+                refTracker.ensureReachability();
+              }
+            }
+          };
+        });
   }
 
   private final FPIOFunction<DocValuesProducer, FieldInfo, BinaryDocValues> getBinary =
@@ -76,7 +91,22 @@ public class UnloadingDocValuesProducer extends DocValuesProducer {
 
   @Override
   public BinaryDocValues getBinary(FieldInfo field) throws IOException {
-    return u.execute(getBinary, field);
+    return u.execute(
+        getBinary,
+        field,
+        true,
+        (raw, refTracker) -> {
+          return new FilterBinaryDocValues(raw) {
+            @Override
+            public long cost() {
+              try {
+                return super.cost();
+              } finally {
+                refTracker.ensureReachability();
+              }
+            }
+          };
+        });
   }
 
   private final FPIOFunction<DocValuesProducer, FieldInfo, SortedDocValues> getSorted =
@@ -88,11 +118,9 @@ public class UnloadingDocValuesProducer extends DocValuesProducer {
         getSorted,
         field,
         true,
-        (rawSorted, refCount) -> {
+        (rawSorted, registerRef) -> {
           // wrap so that we can track refs for returned `TermsEnum` instances
           return new FilterSortedDocValues(rawSorted) {
-            private final Unloader.RefTracker registerRef = new Unloader.RefTracker(in, refCount);
-
             @Override
             public TermsEnum intersect(CompiledAutomaton automaton) throws IOException {
               return Unloader.wrap(
@@ -112,7 +140,22 @@ public class UnloadingDocValuesProducer extends DocValuesProducer {
 
   @Override
   public SortedNumericDocValues getSortedNumeric(FieldInfo field) throws IOException {
-    return u.execute(getSortedNumeric, field);
+    return u.execute(
+        getSortedNumeric,
+        field,
+        true,
+        (raw, refTracker) -> {
+          return new FilterSortedNumericDocValues(raw) {
+            @Override
+            public long cost() {
+              try {
+                return super.cost();
+              } finally {
+                refTracker.ensureReachability();
+              }
+            }
+          };
+        });
   }
 
   private final FPIOFunction<DocValuesProducer, FieldInfo, SortedSetDocValues> getSortedSet =
@@ -124,20 +167,26 @@ public class UnloadingDocValuesProducer extends DocValuesProducer {
         getSortedSet,
         field,
         true,
-        (rawSorted, refCount) -> {
+        (rawSorted, registerRef) -> {
           // wrap so that we can track refs for returned `TermsEnum` instances
           return new FilterSortedSetDocValues(rawSorted) {
-            private final Unloader.RefTracker registerRef = new Unloader.RefTracker(in, refCount);
-
             @Override
             public TermsEnum intersect(CompiledAutomaton automaton) throws IOException {
-              return Unloader.wrap(
-                  registerRef.trackedInstance(() -> super.intersect(automaton)), registerRef);
+              try {
+                return Unloader.wrap(
+                    registerRef.trackedInstance(() -> super.intersect(automaton)), registerRef);
+              } finally {
+                registerRef.ensureReachability();
+              }
             }
 
             @Override
             public TermsEnum termsEnum() throws IOException {
-              return Unloader.wrap(registerRef.trackedInstance(super::termsEnum), registerRef);
+              try {
+                return Unloader.wrap(registerRef.trackedInstance(super::termsEnum), registerRef);
+              } finally {
+                registerRef.ensureReachability();
+              }
             }
           };
         });

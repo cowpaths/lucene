@@ -19,7 +19,6 @@ package org.apache.lucene.index;
 import static org.apache.lucene.index.Unloader.FPIOFunction;
 
 import java.io.IOException;
-import java.lang.ref.Reference;
 import org.apache.lucene.codecs.DocValuesProducer;
 import org.apache.lucene.codecs.PointsReader;
 import org.apache.lucene.util.IOFunction;
@@ -72,10 +71,9 @@ public class UnloadingPointsReader extends PointsReader {
         getValues,
         field,
         false,
-        (rawPointValues, refCount) -> {
+        (rawPointValues, registerRef) -> {
           // NOTE: we have to wrap here in order to track derived `PointTree` instances
           return new PointValues() {
-            private final Unloader.RefTracker registerRef = new Unloader.RefTracker(this, refCount);
 
             @Override
             public PointTree getPointTree() throws IOException {
@@ -83,7 +81,7 @@ public class UnloadingPointsReader extends PointsReader {
                 return Unloader.wrap(
                     registerRef.trackedInstance(rawPointValues::getPointTree), registerRef);
               } finally {
-                Reference.reachabilityFence(this);
+                registerRef.ensureReachability();
               }
             }
 
@@ -92,7 +90,7 @@ public class UnloadingPointsReader extends PointsReader {
               try {
                 return rawPointValues.getMinPackedValue();
               } finally {
-                Reference.reachabilityFence(this);
+                registerRef.ensureReachability();
               }
             }
 
@@ -101,7 +99,7 @@ public class UnloadingPointsReader extends PointsReader {
               try {
                 return rawPointValues.getMaxPackedValue();
               } finally {
-                Reference.reachabilityFence(this);
+                registerRef.ensureReachability();
               }
             }
 
@@ -110,7 +108,7 @@ public class UnloadingPointsReader extends PointsReader {
               try {
                 return rawPointValues.getNumDimensions();
               } finally {
-                Reference.reachabilityFence(this);
+                registerRef.ensureReachability();
               }
             }
 
@@ -119,7 +117,7 @@ public class UnloadingPointsReader extends PointsReader {
               try {
                 return rawPointValues.getNumIndexDimensions();
               } finally {
-                Reference.reachabilityFence(this);
+                registerRef.ensureReachability();
               }
             }
 
@@ -128,7 +126,7 @@ public class UnloadingPointsReader extends PointsReader {
               try {
                 return rawPointValues.getBytesPerDimension();
               } finally {
-                Reference.reachabilityFence(this);
+                registerRef.ensureReachability();
               }
             }
 
@@ -137,7 +135,7 @@ public class UnloadingPointsReader extends PointsReader {
               try {
                 return rawPointValues.size();
               } finally {
-                Reference.reachabilityFence(this);
+                registerRef.ensureReachability();
               }
             }
 
@@ -146,7 +144,7 @@ public class UnloadingPointsReader extends PointsReader {
               try {
                 return rawPointValues.getDocCount();
               } finally {
-                Reference.reachabilityFence(this);
+                registerRef.ensureReachability();
               }
             }
           };
