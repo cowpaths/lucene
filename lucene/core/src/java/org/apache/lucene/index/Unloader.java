@@ -54,6 +54,7 @@ import org.apache.lucene.codecs.PointsReader;
 import org.apache.lucene.store.AlreadyClosedException;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.UnloaderCoordinationPoint;
+import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.IOFunction;
 import org.apache.lucene.util.IOSupplier;
 import org.apache.lucene.util.InfoStream;
@@ -237,6 +238,7 @@ public class Unloader<T extends Closeable> implements Closeable {
           REF_REMOVER,
           FLUSH_HOLDING,
           EXTERNAL_REFQUEUE_HANDLING,
+          INDIRECT_TRACK_COUNT_SUPPLIER,
           HOLDING_SIZE_SUPPLIER,
           OUTSTANDING_SIZE_SUPPLIER);
     }
@@ -815,6 +817,9 @@ public class Unloader<T extends Closeable> implements Closeable {
     }
   }
 
+  private static final LongAdder INDIRECT_TRACK_COUNT = new LongAdder();
+  private static final LongSupplier INDIRECT_TRACK_COUNT_SUPPLIER = INDIRECT_TRACK_COUNT::sum;
+
   private static final Lock[] HOLD_LOCKS = new Lock[PARALLEL_HEAD_FACTOR];
   private static final Condition[] HOLD_MUST_FLUSH = new Condition[PARALLEL_HEAD_FACTOR];
   private static final AtomicInteger[] HOLD_SIZES = new AtomicInteger[PARALLEL_HEAD_FACTOR];
@@ -933,8 +938,8 @@ public class Unloader<T extends Closeable> implements Closeable {
    * Number of ram bytes per instance of {@link Ref}. This can be used in conjunction with {@link
    * #OUTSTANDING_SIZE_SUPPLIER} (accessed via the final arg to {@link
    * UnloadHelper#maybeHandleRefQueues(ReferenceQueue[], Consumer, HoldingFlusher, AtomicReference,
-   * LongSupplier, LongSupplier)}) to determine the point-in-time heap usage associated with
-   * refQueue reference tracking.
+   * LongSupplier, LongSupplier, LongSupplier)}) to determine the point-in-time heap usage
+   * associated with refQueue reference tracking.
    */
   public static final long RAMBYTES_PER_REF =
       RamUsageEstimator.shallowSizeOfInstance(Ref.class)
@@ -944,8 +949,8 @@ public class Unloader<T extends Closeable> implements Closeable {
    * Number of ram bytes per instance of {@link HoldingRef}. This can be used in conjunction with
    * {@link #HOLDING_SIZE_SUPPLIER} (accessed via the second-to-last arg of {@link
    * UnloadHelper#maybeHandleRefQueues(ReferenceQueue[], Consumer, HoldingFlusher, AtomicReference,
-   * LongSupplier, LongSupplier)}) to determine the point-in-time heap usage associated with
-   * "holding area" refQueue reference tracking.
+   * LongSupplier, LongSupplier, LongSupplier)}) to determine the point-in-time heap usage
+   * associated with "holding area" refQueue reference tracking.
    */
   public static final long RAMBYTES_PER_HOLDINGREF =
       RamUsageEstimator.shallowSizeOfInstance(HoldingRef.class);
@@ -1125,7 +1130,11 @@ public class Unloader<T extends Closeable> implements Closeable {
 
       @Override
       public long size() {
-        return pt.size();
+        try {
+          return pt.size();
+        } finally {
+          registerRef.ensureTopLevelReachability();
+        }
       }
 
       @Override
@@ -1140,28 +1149,135 @@ public class Unloader<T extends Closeable> implements Closeable {
     };
   }
 
+  private static final class TrackingPostingsEnum extends FilterLeafReader.FilterPostingsEnum {
+    private final RefTracker registerRef;
+
+    private TrackingPostingsEnum(PostingsEnum in, RefTracker registerRef) {
+      super(in);
+      this.registerRef = registerRef;
+    }
+
+    @Override
+    public long cost() {
+      try {
+        return super.cost();
+      } finally {
+        registerRef.ensureTopLevelReachability();
+      }
+    }
+  }
+
   static TermsEnum wrap(TermsEnum te, RefTracker registerRef) throws IOException {
     return new FilterLeafReader.FilterTermsEnum(te) {
       @Override
       public PostingsEnum postings(PostingsEnum reuse, int flags) throws IOException {
-        return registerRef.trackedInstance(() -> super.postings(reuse, flags));
+        if (TRACK_ALL_REFS_DIRECTLY) {
+          return registerRef.trackedInstance(() -> super.postings(reuse, flags));
+        }
+        INDIRECT_TRACK_COUNT.increment();
+        if (reuse instanceof TrackingPostingsEnum) {
+          PostingsEnum extantIn = ((TrackingPostingsEnum) reuse).in;
+          PostingsEnum check = super.postings(extantIn, flags);
+          if (check == extantIn) {
+            // same backing, with updated state
+            return reuse;
+          } else {
+            return new TrackingPostingsEnum(check, registerRef);
+          }
+        } else {
+          return new TrackingPostingsEnum(super.postings(reuse, flags), registerRef);
+        }
       }
 
       @Override
       public ImpactsEnum impacts(int flags) throws IOException {
-        return registerRef.trackedInstance(() -> super.impacts(flags));
+        if (TRACK_ALL_REFS_DIRECTLY) {
+          return registerRef.trackedInstance(() -> super.impacts(flags));
+        } else {
+          INDIRECT_TRACK_COUNT.increment();
+          ImpactsEnum raw = super.impacts(flags);
+          return new ImpactsEnum() {
+            @Override
+            public void advanceShallow(int target) throws IOException {
+              raw.advanceShallow(target);
+            }
+
+            @Override
+            public Impacts getImpacts() throws IOException {
+              return raw.getImpacts();
+            }
+
+            @Override
+            public int freq() throws IOException {
+              return raw.freq();
+            }
+
+            @Override
+            public int nextPosition() throws IOException {
+              return raw.nextPosition();
+            }
+
+            @Override
+            public int startOffset() throws IOException {
+              return raw.startOffset();
+            }
+
+            @Override
+            public int endOffset() throws IOException {
+              return raw.endOffset();
+            }
+
+            @Override
+            public BytesRef getPayload() throws IOException {
+              return raw.getPayload();
+            }
+
+            @Override
+            public int docID() {
+              return raw.docID();
+            }
+
+            @Override
+            public int nextDoc() throws IOException {
+              return raw.nextDoc();
+            }
+
+            @Override
+            public int advance(int target) throws IOException {
+              return raw.advance(target);
+            }
+
+            @Override
+            public long cost() {
+              try {
+                return raw.cost();
+              } finally {
+                registerRef.ensureTopLevelReachability();
+              }
+            }
+          };
+        }
       }
     };
   }
 
+  static final boolean TRACK_ALL_REFS_DIRECTLY =
+      "true".equals(System.getProperty("lucene.unload.trackAllRefsDirectly"));
+
   static final class RefTracker {
+    private final Object topLevel;
     private final AtomicInteger refCount;
 
-    private RefTracker(AtomicInteger refCount) {
+    RefTracker(Object topLevel, AtomicInteger refCount) {
+      this.topLevel = TRACK_ALL_REFS_DIRECTLY ? null : topLevel;
       this.refCount = refCount;
     }
 
     <T> T trackedInstance(IOSupplier<T> supplier) throws IOException {
+      if (!TRACK_ALL_REFS_DIRECTLY) {
+        INDIRECT_TRACK_COUNT.increment();
+        return supplier.get();
+      }
       refCount.getAndUpdate(ACQUIRE);
       T ret;
       try {
@@ -1173,10 +1289,21 @@ public class Unloader<T extends Closeable> implements Closeable {
       add(ret, refCount);
       return ret;
     }
+
+    /**
+     * Ensures that the top-level object (if present) is reachable.
+     *
+     * <p>Suppress warning; <i>this method</i> should only be called within a <code>finally</code>
+     * block.
+     */
+    @SuppressWarnings("ReachabilityFenceUsage")
+    private void ensureTopLevelReachability() {
+      Reference.reachabilityFence(topLevel);
+    }
   }
 
   interface RefTrackShim<V> {
-    V shim(V in, RefTracker refTracker);
+    V shim(V in, AtomicInteger refCount);
   }
 
   <K, V> V execute(FPIOFunction<T, K, V> function, K arg) throws IOException {
@@ -1207,7 +1334,7 @@ public class Unloader<T extends Closeable> implements Closeable {
       } else {
         AtomicInteger refCount = active.refCount;
         refCount.getAndUpdate(ACQUIRE);
-        V ret = shim == null ? raw : shim.shim(raw, new RefTracker(refCount));
+        V ret = shim == null ? raw : shim.shim(raw, refCount);
         add(trackRaw ? raw : ret, refCount);
         return ret;
       }
@@ -1363,8 +1490,8 @@ public class Unloader<T extends Closeable> implements Closeable {
    *
    * <p>e.g., framework may supply its own {@link ScheduledExecutorService} for running unload
    * checks, and may (via {@link #maybeHandleRefQueues(ReferenceQueue[], Consumer, HoldingFlusher,
-   * AtomicReference, LongSupplier, LongSupplier)} manage the handling of reference tracking as
-   * well.
+   * AtomicReference, LongSupplier, LongSupplier, LongSupplier)} manage the handling of reference
+   * tracking as well.
    */
   public interface UnloadHelper {
     /**
@@ -1409,6 +1536,10 @@ public class Unloader<T extends Closeable> implements Closeable {
      * @param handleRefQueue implementations should update this to <code>true</code> if they plan to
      *     handle the refQueues, and should set it back to <code>false</code> if/when they stop
      *     handling any of the provided refQueues.
+     * @param indirectTrackedCount for metrics; the number of references not tracked directly, but
+     *     tracked via reference to top-level tracked object.
+     * @param holdingSize for metrics; the number of references not formally tracked by GC, but in a
+     *     "holding area" before being tracked if necessary.
      * @param outstandingSize for metrics; the number of references tracked but not yet collected
      *     off a refQueue.
      */
@@ -1417,6 +1548,7 @@ public class Unloader<T extends Closeable> implements Closeable {
         Consumer<Object> handler,
         HoldingFlusher flushHolding,
         AtomicReference<Boolean> handleRefQueue,
+        LongSupplier indirectTrackedCount,
         LongSupplier holdingSize,
         LongSupplier outstandingSize) {}
     ;
@@ -1460,6 +1592,7 @@ public class Unloader<T extends Closeable> implements Closeable {
         REF_REMOVER,
         FLUSH_HOLDING,
         EXTERNAL_REFQUEUE_HANDLING,
+        INDIRECT_TRACK_COUNT_SUPPLIER,
         HOLDING_SIZE_SUPPLIER,
         OUTSTANDING_SIZE_SUPPLIER);
   }

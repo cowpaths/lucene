@@ -88,9 +88,11 @@ public class UnloadingDocValuesProducer extends DocValuesProducer {
         getSorted,
         field,
         true,
-        (rawSorted, registerRef) -> {
+        (rawSorted, refCount) -> {
           // wrap so that we can track refs for returned `TermsEnum` instances
           return new FilterSortedDocValues(rawSorted) {
+            private final Unloader.RefTracker registerRef = new Unloader.RefTracker(in, refCount);
+
             @Override
             public TermsEnum intersect(CompiledAutomaton automaton) throws IOException {
               return Unloader.wrap(
@@ -122,9 +124,11 @@ public class UnloadingDocValuesProducer extends DocValuesProducer {
         getSortedSet,
         field,
         true,
-        (rawSorted, registerRef) -> {
+        (rawSorted, refCount) -> {
           // wrap so that we can track refs for returned `TermsEnum` instances
           return new FilterSortedSetDocValues(rawSorted) {
+            private final Unloader.RefTracker registerRef = new Unloader.RefTracker(in, refCount);
+
             @Override
             public TermsEnum intersect(CompiledAutomaton automaton) throws IOException {
               return Unloader.wrap(

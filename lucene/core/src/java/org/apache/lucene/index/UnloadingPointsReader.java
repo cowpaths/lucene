@@ -72,9 +72,11 @@ public class UnloadingPointsReader extends PointsReader {
         getValues,
         field,
         false,
-        (rawPointValues, registerRef) -> {
+        (rawPointValues, refCount) -> {
           // NOTE: we have to wrap here in order to track derived `PointTree` instances
           return new PointValues() {
+            private final Unloader.RefTracker registerRef = new Unloader.RefTracker(this, refCount);
+
             @Override
             public PointTree getPointTree() throws IOException {
               try {

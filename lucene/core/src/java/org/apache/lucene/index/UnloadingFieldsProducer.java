@@ -101,7 +101,7 @@ public class UnloadingFieldsProducer extends FieldsProducer {
         terms,
         field,
         false,
-        (rawTerms, registerRef) -> {
+        (rawTerms, refCount) -> {
           // NOTE: we have to wrap here because a reference to the raw value may be
           // retained internal to the backing `FieldsProducer`. This can generate a
           // profusion of redundant references that never get collected. This is a
@@ -111,6 +111,8 @@ public class UnloadingFieldsProducer extends FieldsProducer {
           // This particular rationale for wrapping only applies to `Terms` -- other
           // resources are already created as one-offs.
           return new FilterLeafReader.FilterTerms(rawTerms) {
+            private final Unloader.RefTracker registerRef = new Unloader.RefTracker(this, refCount);
+
             @Override
             public TermsEnum iterator() throws IOException {
               try {

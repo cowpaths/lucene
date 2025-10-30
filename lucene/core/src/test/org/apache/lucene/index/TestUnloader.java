@@ -266,6 +266,7 @@ public class TestUnloader extends LuceneTestCase {
               Consumer<Object> handler,
               HoldingFlusher flushHolding,
               AtomicReference<Boolean> handleRefQueue,
+              LongSupplier indirectTrackCount,
               LongSupplier holdingSize,
               LongSupplier outstandingSize) {
             handleRefQueue.set(true);
