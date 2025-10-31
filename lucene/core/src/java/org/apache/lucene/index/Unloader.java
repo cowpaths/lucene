@@ -37,14 +37,10 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.LongAdder;
-import java.util.concurrent.locks.Condition;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
 import java.util.function.Consumer;
 import java.util.function.IntUnaryOperator;
 import java.util.function.LongSupplier;
@@ -188,36 +184,6 @@ public class Unloader<T extends Closeable> implements Closeable {
 
   private static final Consumer<Object> REF_REMOVER = (r) -> remove((Ref) r);
 
-  private static final HoldingFlusher FLUSH_HOLDING = Unloader::drainHolding;
-
-  /**
-   * Flushes any eligible references from the "holding" area (where they are held for a period of
-   * time before being formally tracked by {@link ReferenceQueue}.
-   */
-  public interface HoldingFlusher {
-    /**
-     * Flushes any eligible refs from the "holding" pool into the actual {@link ReferenceQueue}
-     * tracked phase. This method may block according to the value of `expectHoldUntil`; it may also
-     * execute early if the "holding area" capacity is exceeded (as determined by {@link
-     * #HIGH_WATERMARK}).
-     *
-     * @param expectHoldUntil initial call should pass {@link System#nanoTime()}; subsequent calls
-     *     should pass the value placed in the `nextHoldUntil` array on the preceding invocation of
-     *     this method.
-     * @param parallelIdx the index of the parallel segment of reference tracking that should be
-     *     operated on
-     * @param nextHoldUntil this holds the next time (in nanos) when subsequent calls to this method
-     *     should re-execute. The value placed in this holder should be passed into subsequent calls
-     *     as the `expectHoldUntil` parameter.
-     * @return the number of refs reclaimed (i.e. removed from `holding` area, but already
-     *     collected, so released (instead of being transferred to formal tracking
-     * @throws InterruptedException if interrupted while waiting to execute (e.g., if shutting down
-     *     and this reference processor is being closed).
-     */
-    int flush(long expectHoldUntil, int parallelIdx, long[] nextHoldUntil)
-        throws InterruptedException;
-  }
-
   /**
    * Creates a new unloader to handle unloading and on-demand reloading a backing resource
    *
@@ -242,10 +208,8 @@ public class Unloader<T extends Closeable> implements Closeable {
       unloadHelper.maybeHandleRefQueues(
           removeOutstanding,
           REF_REMOVER,
-          FLUSH_HOLDING,
           EXTERNAL_REFQUEUE_HANDLING,
           INDIRECT_TRACK_COUNT_SUPPLIER,
-          HOLDING_SIZE_SUPPLIER,
           OUTSTANDING_SIZE_SUPPLIER);
     }
     this.reporter = unloadHelper;
@@ -765,235 +729,19 @@ public class Unloader<T extends Closeable> implements Closeable {
     }
   }
 
-  private static final class HoldingRef extends WeakReference<Object> {
-    private final long holdUntilNanos;
-    private final AtomicInteger refCount;
-    private volatile HoldingRef prev;
-
-    public HoldingRef(Object referent, AtomicInteger refCount, long holdNanos) {
-      super(referent);
-      this.refCount = refCount;
-      this.holdUntilNanos = System.nanoTime() + holdNanos;
-    }
-  }
-
-  private static final class HoldingState {
-    private final HoldingRef tail;
-    private final HoldingRef head;
-
-    private HoldingState(HoldingRef tail, HoldingRef head) {
-      this.tail = tail;
-      this.head = head;
-    }
-  }
-
-  @SuppressWarnings({"unchecked", "rawtypes"})
-  private static final AtomicReference<HoldingState>[] HOLDING =
-      new AtomicReference[PARALLEL_HEAD_FACTOR];
-
-  private static final AtomicBoolean[] HOLDING_DRAIN = new AtomicBoolean[PARALLEL_HEAD_FACTOR];
-
-  private static final HoldingState INITIAL = new HoldingState(null, null);
-
-  static {
-    for (int i = PARALLEL_HEAD_FACTOR - 1; i >= 0; i--) {
-      HOLDING[i] = new AtomicReference<>(INITIAL);
-      HOLDING_DRAIN[i] = new AtomicBoolean();
-    }
-  }
-
-  private static final long[] DUMMY = new long[1];
-
-  private static void addHolding(Object o, AtomicInteger refCount, int parallelIdx) {
-    int sz = HOLD_SIZES[parallelIdx].incrementAndGet();
-    if (sz == HIGH_WATERMARK || sz > FALLBACK_HIGH_WATERMARK) {
-      Lock lock = HOLD_LOCKS[parallelIdx];
-      lock.lock();
-      try {
-        HOLD_MUST_FLUSH[parallelIdx].signal();
-      } finally {
-        lock.unlock();
-      }
-    }
-    AtomicReference<HoldingState> state = HOLDING[parallelIdx];
-    if (EXTERNAL_REFQUEUE_HANDLING.get() != Boolean.TRUE) drainHolding(10, parallelIdx, DUMMY, 0);
-    HoldingRef add = new HoldingRef(o, refCount, HOLDING_NANOS);
-    HoldingState extant =
-        state.getAndUpdate((e) -> new HoldingState(add, e.head == null ? add : e.head));
-    HoldingRef replaced = extant.tail;
-    if (replaced != null) {
-      replaced.prev = add;
-    }
-  }
-
   private static final LongAdder INDIRECT_TRACK_COUNT = new LongAdder();
   private static final LongSupplier INDIRECT_TRACK_COUNT_SUPPLIER = INDIRECT_TRACK_COUNT::sum;
-
-  private static final Lock[] HOLD_LOCKS = new Lock[PARALLEL_HEAD_FACTOR];
-  private static final Condition[] HOLD_MUST_FLUSH = new Condition[PARALLEL_HEAD_FACTOR];
-  private static final AtomicInteger[] HOLD_SIZES = new AtomicInteger[PARALLEL_HEAD_FACTOR];
-
-  private static final LongSupplier HOLDING_SIZE_SUPPLIER =
-      () -> Arrays.stream(HOLD_SIZES).mapToLong(AtomicInteger::get).sum();
-
-  static {
-    for (int i = PARALLEL_HEAD_MASK; i >= 0; i--) {
-      Lock lock = new ReentrantLock();
-      HOLD_LOCKS[i] = lock;
-      HOLD_MUST_FLUSH[i] = lock.newCondition();
-      HOLD_SIZES[i] = new AtomicInteger();
-    }
-  }
-
-  private static final long MIN_DELAY_NANOS = TimeUnit.MILLISECONDS.toNanos(250);
-
-  private static int drainHolding(long expectHoldUntil, int parallelIdx, long[] nextHoldUntil)
-      throws InterruptedException {
-    Lock lock = HOLD_LOCKS[parallelIdx];
-    lock.lock();
-    int mustTransfer;
-    int snapshot;
-    try {
-      if (HOLD_MUST_FLUSH[parallelIdx].awaitNanos(
-              Math.max(expectHoldUntil - System.nanoTime(), MIN_DELAY_NANOS))
-          > 0) {
-        snapshot = HOLD_SIZES[parallelIdx].getAndSet(0);
-        mustTransfer = snapshot - LOW_WATERMARK;
-      } else {
-        snapshot = 0;
-        mustTransfer = 0;
-      }
-    } finally {
-      lock.unlock();
-    }
-    try {
-      return drainHolding(Integer.MAX_VALUE, parallelIdx, nextHoldUntil, mustTransfer);
-    } finally {
-      if (snapshot != 0) {
-        HOLD_SIZES[parallelIdx].addAndGet(snapshot);
-      }
-    }
-  }
-
-  private static boolean accept(long now, HoldingRef candidate, Object o) {
-    return now - candidate.holdUntilNanos > 0 || o == null;
-  }
-
-  private static int drainHolding(
-      int limit, int parallelIdx, long[] nextHoldUntil, int mustTransfer) {
-    AtomicBoolean draining = HOLDING_DRAIN[parallelIdx];
-    if (!draining.compareAndSet(false, true)) {
-      nextHoldUntil[0] =
-          System.nanoTime() + HOLDING_NANOS; // in normal usage this should be unusual
-      return 0;
-    }
-    try {
-      AtomicReference<HoldingState> head = HOLDING[parallelIdx];
-      long now = System.nanoTime();
-      final HoldingState state = head.get();
-      HoldingRef candidate = state.head;
-      if (candidate == null) {
-        nextHoldUntil[0] = now + HOLDING_NANOS;
-        return 0;
-      } else if (now - candidate.holdUntilNanos <= 0) {
-        nextHoldUntil[0] = candidate.holdUntilNanos;
-        return 0;
-      }
-      HoldingRef last;
-      int releaseCount = 0;
-      Object o = candidate.get();
-      int sizeAdjust = 0;
-      do {
-        if (o == null) {
-          // collected; we can just release
-          releaseCount++;
-          candidate.refCount.getAndUpdate(RELEASE);
-        } else {
-          // not yet collected; we need to create a fully-tracked ref
-          add(o, candidate.refCount, parallelIdx);
-        }
-        last = candidate;
-        candidate = candidate.prev;
-        sizeAdjust--;
-        mustTransfer--;
-      } while (--limit > 0
-          && candidate != null
-          && (accept(now, candidate, o = candidate.get()) || mustTransfer > 0));
-      if (candidate != null) {
-        // easiest case; set unconditionally
-        HoldingRef candidateF = candidate;
-        head.getAndUpdate((e) -> new HoldingState(e.tail, candidateF));
-        nextHoldUntil[0] = candidateF.holdUntilNanos;
-      } else if (state.tail == last && head.compareAndSet(state, INITIAL)) {
-        // we cleared the queue; nothing more to do
-        nextHoldUntil[0] = now + HOLDING_NANOS;
-      } else {
-        // we know that we'll have a non-null candidate
-        while ((candidate = last.prev) == null) {
-          Thread.yield();
-        }
-        HoldingRef candidateF = candidate;
-        head.getAndUpdate((e) -> new HoldingState(e.tail, candidateF));
-        nextHoldUntil[0] = candidateF.holdUntilNanos;
-      }
-      HOLD_SIZES[parallelIdx].addAndGet(sizeAdjust);
-      return releaseCount;
-    } finally {
-      draining.set(false);
-    }
-  }
 
   /**
    * Number of ram bytes per instance of {@link Ref}. This can be used in conjunction with {@link
    * #OUTSTANDING_SIZE_SUPPLIER} (accessed via the final arg to {@link
-   * UnloadHelper#maybeHandleRefQueues(ReferenceQueue[], Consumer, HoldingFlusher, AtomicReference,
-   * LongSupplier, LongSupplier, LongSupplier)}) to determine the point-in-time heap usage
-   * associated with refQueue reference tracking.
+   * UnloadHelper#maybeHandleRefQueues(ReferenceQueue[], Consumer, AtomicReference, LongSupplier,
+   * LongSupplier)}) to determine the point-in-time heap usage associated with refQueue reference
+   * tracking.
    */
   public static final long RAMBYTES_PER_REF =
       RamUsageEstimator.shallowSizeOfInstance(Ref.class)
           + RamUsageEstimator.shallowSizeOfInstance(AtomicReference.class);
-
-  /**
-   * Number of ram bytes per instance of {@link HoldingRef}. This can be used in conjunction with
-   * {@link #HOLDING_SIZE_SUPPLIER} (accessed via the second-to-last arg of {@link
-   * UnloadHelper#maybeHandleRefQueues(ReferenceQueue[], Consumer, HoldingFlusher, AtomicReference,
-   * LongSupplier, LongSupplier, LongSupplier)}) to determine the point-in-time heap usage
-   * associated with "holding area" refQueue reference tracking.
-   */
-  public static final long RAMBYTES_PER_HOLDINGREF =
-      RamUsageEstimator.shallowSizeOfInstance(HoldingRef.class);
-
-  private static final int DEFAULT_HOLD_TARGET_MEGABYTES = 10;
-  private static final int HOLD_TARGET_MEGABYTES;
-
-  static {
-    List<String> deferred = DEFERRED_INIT_MESSAGES.get();
-    String spec = System.getProperty("lucene.unload.holdTargetMegabytes");
-    int tmp;
-    if (spec == null || spec.isEmpty()) {
-      tmp = DEFAULT_HOLD_TARGET_MEGABYTES;
-    } else {
-      try {
-        tmp = Integer.parseInt(spec);
-      } catch (
-          @SuppressWarnings("unused")
-          Exception e) {
-        tmp = DEFAULT_HOLD_TARGET_MEGABYTES;
-      }
-    }
-    HOLD_TARGET_MEGABYTES = tmp;
-    deferred.add("INFO: set static property HOLD_TARGET_MEGABYTES=" + HOLD_TARGET_MEGABYTES);
-  }
-
-  private static final int HIGH_WATERMARK =
-      HOLD_TARGET_MEGABYTES
-          * 1024
-          * 1024
-          / Math.toIntExact(RAMBYTES_PER_HOLDINGREF)
-          / PARALLEL_HEAD_FACTOR;
-  private static final int LOW_WATERMARK = HIGH_WATERMARK >> 1;
-  private static final int FALLBACK_HIGH_WATERMARK = HIGH_WATERMARK + LOW_WATERMARK;
 
   private static final class Ref extends PhantomReference<Object> {
     private final AtomicInteger refCount;
@@ -1033,14 +781,6 @@ public class Unloader<T extends Closeable> implements Closeable {
     } else {
       parallelIdx = ARBITRARY_REFQUEUE.getAndIncrement() & PARALLEL_HEAD_MASK;
     }
-    if (HOLDING_NANOS == -1) {
-      add(o, refCount, parallelIdx);
-    } else {
-      addHolding(o, refCount, parallelIdx);
-    }
-  }
-
-  private static void add(final Object o, AtomicInteger refCount, int parallelIdx) {
     OUTSTANDING_SIZE.increment();
     if (EXTERNAL_REFQUEUE_HANDLING.get() != Boolean.TRUE) drainRemoveOutstanding();
     Ref head = HEAD[parallelIdx];
@@ -1444,9 +1184,6 @@ public class Unloader<T extends Closeable> implements Closeable {
             + TimeUnit.NANOSECONDS.toMillis(INITIAL_NANOS));
   }
 
-  private static final long HOLDING_NANOS =
-      !"false".equals(System.getProperty("lucene.unload.holding")) ? KEEP_ALIVE_NANOS : -1;
-
   private static long getNanos(
       String syspropName, String defaultSpec, long defaultNanos, List<String> deferred) {
     try {
@@ -1501,18 +1238,6 @@ public class Unloader<T extends Closeable> implements Closeable {
   }
 
   // visible for testing
-  static int nonEmptyHoldingHeadCount() {
-    return Math.toIntExact(
-        Arrays.stream(HOLDING)
-            .filter(
-                (r) -> {
-                  HoldingState s = r.get();
-                  return s.tail != null || s.head != null;
-                })
-            .count());
-  }
-
-  // visible for testing
   static void addDummyReference(int byteSize) {
     add(new byte[byteSize], new AtomicInteger(1));
   }
@@ -1524,9 +1249,8 @@ public class Unloader<T extends Closeable> implements Closeable {
    * the underlying components that handle load/unload according to framework lifecycles.
    *
    * <p>e.g., framework may supply its own {@link ScheduledExecutorService} for running unload
-   * checks, and may (via {@link #maybeHandleRefQueues(ReferenceQueue[], Consumer, HoldingFlusher,
-   * AtomicReference, LongSupplier, LongSupplier, LongSupplier)} manage the handling of reference
-   * tracking as well.
+   * checks, and may (via {@link #maybeHandleRefQueues(ReferenceQueue[], Consumer, AtomicReference,
+   * LongSupplier, LongSupplier)} manage the handling of reference tracking as well.
    */
   public interface UnloadHelper {
     /**
@@ -1573,18 +1297,14 @@ public class Unloader<T extends Closeable> implements Closeable {
      *     handling any of the provided refQueues.
      * @param indirectTrackedCount for metrics; the number of references not tracked directly, but
      *     tracked via reference to top-level tracked object.
-     * @param holdingSize for metrics; the number of references not formally tracked by GC, but in a
-     *     "holding area" before being tracked if necessary.
      * @param outstandingSize for metrics; the number of references tracked but not yet collected
      *     off a refQueue.
      */
     default void maybeHandleRefQueues(
         ReferenceQueue<Object>[] queues,
         Consumer<Object> handler,
-        HoldingFlusher flushHolding,
         AtomicReference<Boolean> handleRefQueue,
         LongSupplier indirectTrackedCount,
-        LongSupplier holdingSize,
         LongSupplier outstandingSize) {}
     ;
   }
@@ -1625,10 +1345,8 @@ public class Unloader<T extends Closeable> implements Closeable {
     unloadHelper.maybeHandleRefQueues(
         removeOutstanding,
         REF_REMOVER,
-        FLUSH_HOLDING,
         EXTERNAL_REFQUEUE_HANDLING,
         INDIRECT_TRACK_COUNT_SUPPLIER,
-        HOLDING_SIZE_SUPPLIER,
         OUTSTANDING_SIZE_SUPPLIER);
   }
 
