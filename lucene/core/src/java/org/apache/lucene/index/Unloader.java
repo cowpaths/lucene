@@ -21,7 +21,6 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.io.PrintStream;
 import java.io.UncheckedIOException;
-import java.lang.ref.PhantomReference;
 import java.lang.ref.Reference;
 import java.lang.ref.ReferenceQueue;
 import java.lang.ref.WeakReference;
@@ -83,7 +82,7 @@ public class Unloader<T extends Closeable> implements Closeable {
     private final boolean unloading;
     private final WeakReference<DelegateFuture<T>> prev;
     private final AtomicInteger refCount;
-    private final AtomicReference<WeakReference<Object>> sentinel;
+    private final AtomicReference<Ref> sentinel;
 
     @SuppressWarnings("unused")
     private volatile T strongRef;
@@ -170,7 +169,7 @@ public class Unloader<T extends Closeable> implements Closeable {
     }
   }
 
-  private static final WeakReference<Object> INITIAL_SENTINEL = new WeakReference<>(null);
+  private static final Ref INITIAL_SENTINEL = new Ref(null, null, null, null);
 
   @SuppressWarnings("unchecked")
   private final DelegateFuture<T> closedSentinel = (DelegateFuture<T>) CLOSED;
@@ -568,10 +567,9 @@ public class Unloader<T extends Closeable> implements Closeable {
 
     private final T val;
     private final AtomicInteger refCount;
-    private final AtomicReference<WeakReference<Object>> sentinel;
+    private final AtomicReference<Ref> sentinel;
 
-    private CloseableVal(
-        T val, AtomicInteger refCount, AtomicReference<WeakReference<Object>> sentinel) {
+    private CloseableVal(T val, AtomicInteger refCount, AtomicReference<Ref> sentinel) {
       this.val = val;
       this.refCount = refCount;
       this.sentinel = sentinel;
@@ -743,7 +741,7 @@ public class Unloader<T extends Closeable> implements Closeable {
       RamUsageEstimator.shallowSizeOfInstance(Ref.class)
           + RamUsageEstimator.shallowSizeOfInstance(AtomicReference.class);
 
-  private static final class Ref extends PhantomReference<Object> {
+  private static final class Ref extends WeakReference<Object> {
     private final AtomicInteger refCount;
     private final AtomicReference<Ref> next = new AtomicReference<>();
     private volatile Ref prev;
@@ -753,11 +751,6 @@ public class Unloader<T extends Closeable> implements Closeable {
       super(referent, q);
       this.refCount = refCount;
       this.prev = prev;
-    }
-
-    @Override
-    public Object get() {
-      throw new UnsupportedOperationException("not supported");
     }
   }
 
@@ -774,7 +767,7 @@ public class Unloader<T extends Closeable> implements Closeable {
 
   private static final AtomicInteger ARBITRARY_REFQUEUE = new AtomicInteger();
 
-  private static void add(final Object o, AtomicInteger refCount) {
+  private static Ref add(final Object o, AtomicInteger refCount) {
     int parallelIdx;
     if (ASSIGN_REFQUEUE_BY_THREAD) {
       parallelIdx = Thread.currentThread().hashCode() & PARALLEL_HEAD_MASK;
@@ -794,6 +787,7 @@ public class Unloader<T extends Closeable> implements Closeable {
       if (!head.next.compareAndSet(RESERVED, ref)) {
         throw new IllegalStateException();
       }
+      return ref;
     } finally {
       Reference.reachabilityFence(o);
     }
@@ -1083,23 +1077,24 @@ public class Unloader<T extends Closeable> implements Closeable {
         return null;
       } else {
         AtomicInteger refCount = active.refCount;
-        AtomicReference<WeakReference<Object>> sentinel = active.sentinel;
+        AtomicReference<Ref> sentinel = active.sentinel;
         Object tracked;
         // TODO: here we assume indirect tracking, so direct tracking won't really work anymore.
         //  fix to make this consistent
         boolean reusedSentinel = true;
-        final WeakReference<Object> initial = sentinel.get();
-        WeakReference<Object> weak = initial;
+        final Ref initial = sentinel.get();
+        Ref weak = initial;
         while ((tracked = weak.get()) == null) {
+          remove(weak);
           tracked = new Object();
-          WeakReference<Object> extant =
-              sentinel.compareAndExchange(weak, new WeakReference<>(tracked));
+          Ref ref = add(tracked, refCount);
+          Ref extant = sentinel.compareAndExchange(weak, ref);
           if (extant == weak) {
             refCount.getAndUpdate(ACQUIRE);
-            add(tracked, refCount);
             reusedSentinel = false;
             break;
           } else {
+            remove(ref);
             weak = extant;
           }
         }
