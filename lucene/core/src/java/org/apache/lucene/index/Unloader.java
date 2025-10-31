@@ -1085,7 +1085,12 @@ public class Unloader<T extends Closeable> implements Closeable {
         final Ref initial = sentinel.get();
         Ref weak = initial;
         while ((tracked = weak.get()) == null) {
-          remove(weak);
+          if (weak != INITIAL_SENTINEL) {
+            // TODO: this double-remove can violate assumptions and cause IllegalStateException
+            //  upon release. Maybe not really a practical problem, but we won't fix this b/c
+            //  I think we can excise all the refqueue stuff.
+            remove(weak);
+          }
           tracked = new Object();
           Ref ref = add(tracked, refCount);
           Ref extant = sentinel.compareAndExchange(weak, ref);
