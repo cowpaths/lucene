@@ -18,31 +18,20 @@ package org.apache.lucene.index;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.lang.ref.ReferenceQueue;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Random;
-import java.util.concurrent.Callable;
-import java.util.concurrent.CancellationException;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
-import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.LongAdder;
-import java.util.function.Consumer;
-import java.util.function.LongSupplier;
-import org.apache.lucene.index.Unloader.BlockingRunnable;
 import org.apache.lucene.store.AlreadyClosedException;
 import org.apache.lucene.tests.util.LuceneTestCase;
 import org.apache.lucene.util.IOFunction;
 import org.apache.lucene.util.InfoStream;
 import org.apache.lucene.util.NamedThreadFactory;
-import org.apache.lucene.util.RamUsageEstimator;
 
 public class TestUnloader extends LuceneTestCase {
   private static final class MyCloseable implements Closeable {
@@ -232,204 +221,5 @@ public class TestUnloader extends LuceneTestCase {
       exec.shutdown();
       exec.awaitTermination(5, TimeUnit.SECONDS);
     }
-  }
-
-  private static final int MAX_KB = 1024;
-  private static final int MIN_KB = 1;
-  private static final int MAX_KB_BASELINE = MAX_KB - MIN_KB + 1;
-
-  private static final int N_SECONDS = 5;
-
-  public void testRefQueueHandling() throws InterruptedException, ExecutionException {
-    int nThreads = 20;
-    final int batchSize = 1024;
-    @SuppressWarnings({"unchecked", "rawtypes"})
-    Consumer<Object>[] registerRef = new Consumer[1];
-    LongSupplier[] outstandingSizeHolder = new LongSupplier[1];
-    @SuppressWarnings({"unchecked", "rawtypes"})
-    ReferenceQueue<Object>[][] removeOutstandingHolder = new ReferenceQueue[1][];
-    @SuppressWarnings({"unchecked", "rawtypes"})
-    AtomicReference<Boolean>[] handleRefQueueHolder = new AtomicReference[1];
-    Unloader.configure(
-        new Unloader.UnloadHelper() {
-          @Override
-          public ScheduledExecutorService onCreation(Unloader<?> u) {
-            return null;
-          }
-
-          @Override
-          public void maybeHandleRefQueues(
-              ReferenceQueue<Object>[] queues,
-              Consumer<Object> handler,
-              AtomicReference<Boolean> handleRefQueue,
-              LongSupplier indirectTrackCount,
-              LongSupplier outstandingSize) {
-            handleRefQueue.set(true);
-            handleRefQueueHolder[0] = handleRefQueue;
-            registerRef[0] = handler;
-            outstandingSizeHolder[0] = outstandingSize;
-            removeOutstandingHolder[0] = queues;
-          }
-        });
-    ReferenceQueue<Object>[] queues = removeOutstandingHolder[0];
-    AtomicReference<Boolean> handleRefQueue = handleRefQueueHolder[0];
-    Consumer<Object> handler = registerRef[0];
-    LongSupplier outstandingSize = outstandingSizeHolder[0];
-
-    int PARALLEL_HEAD_FACTOR = queues.length;
-    ExecutorService exec =
-        Executors.newFixedThreadPool(
-            nThreads + PARALLEL_HEAD_FACTOR, new NamedThreadFactory("TestUnloader"));
-    AtomicBoolean finished = new AtomicBoolean();
-    @SuppressWarnings("rawtypes")
-    Future<?>[] futures = new Future[nThreads];
-    LongAdder total = new LongAdder();
-    long start = System.nanoTime();
-    for (int i = nThreads - 1; i >= 0; i--) {
-      futures[i] =
-          exec.submit(
-              () -> {
-                Random r = new Random(random().nextLong());
-                try {
-                  while (!finished.get()) {
-                    for (int j = batchSize - 1; j >= 0; j--) {
-                      // between 1k and 1m
-                      Unloader.addDummyReference(1024 * (r.nextInt(MAX_KB_BASELINE) + MIN_KB));
-                      total.increment();
-                    }
-                  }
-                } catch (Throwable t) {
-                  t.printStackTrace(System.err);
-                  throw t;
-                }
-              });
-    }
-    LongAdder activeRefQueueProcessors = new LongAdder();
-    LongAdder collectedHoldingRefs = new LongAdder();
-    LongAdder collectedRefs = new LongAdder();
-    @SuppressWarnings("rawtypes")
-    Future<?>[] refQueueFutures = new Future[queues.length];
-    for (int i = queues.length - 1; i >= 0; i--) {
-      ReferenceQueue<Object> q = queues[i];
-      refQueueFutures[i] =
-          exec.submit(
-              wrapTask(
-                  handleRefQueue,
-                  activeRefQueueProcessors,
-                  () -> {
-                    handler.accept(q.remove());
-                    collectedRefs.increment();
-                  }));
-    }
-    long endNanos = System.nanoTime() + TimeUnit.SECONDS.toNanos(N_SECONDS);
-    long remainingNanos;
-    while ((remainingNanos = endNanos - System.nanoTime()) > 0) {
-      long sz = outstandingSize.getAsLong();
-      System.out.println(
-          "seconds remaining: "
-              + TimeUnit.NANOSECONDS.toSeconds(remainingNanos)
-              + ", outstandingSize="
-              + sz
-              + ", active="
-              + activeRefQueueProcessors.sum()
-              + " ("
-              + RamUsageEstimator.humanReadableUnits(sz * Unloader.RAMBYTES_PER_REF)
-              + ")");
-      Thread.sleep(Math.min(1000, TimeUnit.NANOSECONDS.toMillis(remainingNanos)));
-    }
-    finished.set(true);
-    long sum = total.sum();
-    for (int i = nThreads - 1; i >= 0; i--) {
-      futures[i].get();
-    }
-    System.out.println(
-        "tasks completed " + TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start));
-    start = System.nanoTime();
-    int gcIterations = 0;
-    long sz;
-    while ((sz = outstandingSize.getAsLong()) > 0 || Unloader.nonEmptyRefQueueHeadCount() > 0) {
-      gcIterations++;
-      System.gc();
-      Thread.sleep(250);
-      System.err.println(
-          "gc iteration "
-              + gcIterations
-              + ", "
-              + TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start)
-              + ", outstandingSize="
-              + sz
-              + ", active="
-              + activeRefQueueProcessors.sum()
-              + ", nonEmptyRefQueueHeadCount="
-              + Unloader.nonEmptyRefQueueHeadCount());
-      if (gcIterations > 40) {
-        fail("failed to converge");
-      }
-    }
-    handleRefQueue.set(false);
-    for (int i = refQueueFutures.length - 1; i >= 0; i--) {
-      refQueueFutures[i].cancel(true);
-    }
-    for (int i = refQueueFutures.length - 1; i >= 0; i--) {
-      try {
-        refQueueFutures[i].get();
-      } catch (
-          @SuppressWarnings("unused")
-          CancellationException ex) {
-        // this is ok.
-        // NOTE: we can't do `expectThrows()` because depending on where
-        // the task is in the loop, it might exit _without_ `CancellationException`.
-      }
-    }
-    exec.shutdown();
-    assertTrue(exec.awaitTermination(60, TimeUnit.SECONDS));
-    long createdSum = total.sum();
-    long collectedSum = collectedRefs.sum();
-    long collectedHoldingSum = collectedHoldingRefs.sum();
-    assertEquals(createdSum, collectedSum + collectedHoldingSum);
-    System.out.println(
-        "success! "
-            + TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start)
-            + " millis; throughput="
-            + (sum / N_SECONDS)
-            + "/s");
-    System.out.println(
-        "total created="
-            + createdSum
-            + ", collectedHolding="
-            + collectedHoldingSum
-            + ", collected="
-            + collectedSum);
-  }
-
-  private static Callable<Void> wrapTask(
-      AtomicReference<Boolean> handleRefQueue,
-      LongAdder activeRefQueueProcessors,
-      BlockingRunnable r) {
-    return () -> {
-      activeRefQueueProcessors.increment();
-      try {
-        while (handleRefQueue.get() == Boolean.TRUE) {
-          r.run();
-        }
-      } catch (InterruptedException ex) {
-        if (handleRefQueue.get() == Boolean.TRUE) {
-          // unexpected -- we've been interrupted but are still
-          // supposed to be handling ref queue?
-          handleRefQueue.set(false);
-          System.err.println("unexpected interruption of ref queue processing");
-          ex.printStackTrace(System.err);
-          throw ex;
-        }
-      } catch (Throwable t) {
-        handleRefQueue.set(false);
-        System.err.println("exception in ref queue processing");
-        t.printStackTrace(System.err);
-        throw t;
-      } finally {
-        activeRefQueueProcessors.decrement();
-      }
-      return null;
-    };
   }
 }

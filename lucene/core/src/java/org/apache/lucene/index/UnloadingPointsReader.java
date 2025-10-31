@@ -19,6 +19,7 @@ package org.apache.lucene.index;
 import static org.apache.lucene.index.Unloader.FPIOFunction;
 
 import java.io.IOException;
+import java.lang.ref.Reference;
 import org.apache.lucene.codecs.DocValuesProducer;
 import org.apache.lucene.codecs.PointsReader;
 import org.apache.lucene.util.IOFunction;
@@ -71,17 +72,17 @@ public class UnloadingPointsReader extends PointsReader {
         getValues,
         field,
         false,
-        (rawPointValues, registerRef) -> {
+        (rawPointValues, sentinel) -> {
+          assert sentinel != null : "sentinel must not be null!";
           // NOTE: we have to wrap here in order to track derived `PointTree` instances
           return new PointValues() {
 
             @Override
             public PointTree getPointTree() throws IOException {
               try {
-                return Unloader.wrap(
-                    registerRef.trackedInstance(rawPointValues::getPointTree), registerRef);
+                return Unloader.wrap(rawPointValues.getPointTree(), sentinel);
               } finally {
-                registerRef.ensureReachability();
+                Reference.reachabilityFence(sentinel);
               }
             }
 
@@ -90,7 +91,7 @@ public class UnloadingPointsReader extends PointsReader {
               try {
                 return rawPointValues.getMinPackedValue();
               } finally {
-                registerRef.ensureReachability();
+                Reference.reachabilityFence(sentinel);
               }
             }
 
@@ -99,7 +100,7 @@ public class UnloadingPointsReader extends PointsReader {
               try {
                 return rawPointValues.getMaxPackedValue();
               } finally {
-                registerRef.ensureReachability();
+                Reference.reachabilityFence(sentinel);
               }
             }
 
@@ -108,7 +109,7 @@ public class UnloadingPointsReader extends PointsReader {
               try {
                 return rawPointValues.getNumDimensions();
               } finally {
-                registerRef.ensureReachability();
+                Reference.reachabilityFence(sentinel);
               }
             }
 
@@ -117,7 +118,7 @@ public class UnloadingPointsReader extends PointsReader {
               try {
                 return rawPointValues.getNumIndexDimensions();
               } finally {
-                registerRef.ensureReachability();
+                Reference.reachabilityFence(sentinel);
               }
             }
 
@@ -126,7 +127,7 @@ public class UnloadingPointsReader extends PointsReader {
               try {
                 return rawPointValues.getBytesPerDimension();
               } finally {
-                registerRef.ensureReachability();
+                Reference.reachabilityFence(sentinel);
               }
             }
 
@@ -135,7 +136,7 @@ public class UnloadingPointsReader extends PointsReader {
               try {
                 return rawPointValues.size();
               } finally {
-                registerRef.ensureReachability();
+                Reference.reachabilityFence(sentinel);
               }
             }
 
@@ -144,7 +145,7 @@ public class UnloadingPointsReader extends PointsReader {
               try {
                 return rawPointValues.getDocCount();
               } finally {
-                registerRef.ensureReachability();
+                Reference.reachabilityFence(sentinel);
               }
             }
           };

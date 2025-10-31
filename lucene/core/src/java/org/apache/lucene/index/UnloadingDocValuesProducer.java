@@ -19,6 +19,7 @@ package org.apache.lucene.index;
 import static org.apache.lucene.index.Unloader.FPIOFunction;
 
 import java.io.IOException;
+import java.lang.ref.Reference;
 import org.apache.lucene.codecs.DocValuesProducer;
 import org.apache.lucene.util.IOFunction;
 import org.apache.lucene.util.automaton.CompiledAutomaton;
@@ -72,14 +73,15 @@ public class UnloadingDocValuesProducer extends DocValuesProducer {
         getNumeric,
         field,
         true,
-        (raw, refTracker) -> {
+        (raw, sentinel) -> {
+          assert sentinel != null : "sentinel must not be null";
           return new FilterNumericDocValues(raw) {
             @Override
             public long cost() {
               try {
                 return super.cost();
               } finally {
-                refTracker.ensureReachability();
+                Reference.reachabilityFence(sentinel);
               }
             }
           };
@@ -95,14 +97,15 @@ public class UnloadingDocValuesProducer extends DocValuesProducer {
         getBinary,
         field,
         true,
-        (raw, refTracker) -> {
+        (raw, sentinel) -> {
+          assert sentinel != null : "sentinel must not be null";
           return new FilterBinaryDocValues(raw) {
             @Override
             public long cost() {
               try {
                 return super.cost();
               } finally {
-                refTracker.ensureReachability();
+                Reference.reachabilityFence(sentinel);
               }
             }
           };
@@ -118,18 +121,18 @@ public class UnloadingDocValuesProducer extends DocValuesProducer {
         getSorted,
         field,
         true,
-        (rawSorted, registerRef) -> {
+        (rawSorted, sentinel) -> {
+          assert sentinel != null : "sentinel must not be null";
           // wrap so that we can track refs for returned `TermsEnum` instances
           return new FilterSortedDocValues(rawSorted) {
             @Override
             public TermsEnum intersect(CompiledAutomaton automaton) throws IOException {
-              return Unloader.wrap(
-                  registerRef.trackedInstance(() -> super.intersect(automaton)), registerRef);
+              return Unloader.wrap(super.intersect(automaton), sentinel);
             }
 
             @Override
             public TermsEnum termsEnum() throws IOException {
-              return Unloader.wrap(registerRef.trackedInstance(super::termsEnum), registerRef);
+              return Unloader.wrap(super.termsEnum(), sentinel);
             }
           };
         });
@@ -144,14 +147,15 @@ public class UnloadingDocValuesProducer extends DocValuesProducer {
         getSortedNumeric,
         field,
         true,
-        (raw, refTracker) -> {
+        (raw, sentinel) -> {
+          assert sentinel != null : "sentinel must not be null";
           return new FilterSortedNumericDocValues(raw) {
             @Override
             public long cost() {
               try {
                 return super.cost();
               } finally {
-                refTracker.ensureReachability();
+                Reference.reachabilityFence(sentinel);
               }
             }
           };
@@ -167,25 +171,25 @@ public class UnloadingDocValuesProducer extends DocValuesProducer {
         getSortedSet,
         field,
         true,
-        (rawSorted, registerRef) -> {
+        (rawSorted, sentinel) -> {
+          assert sentinel != null : "sentinel must not be null";
           // wrap so that we can track refs for returned `TermsEnum` instances
           return new FilterSortedSetDocValues(rawSorted) {
             @Override
             public TermsEnum intersect(CompiledAutomaton automaton) throws IOException {
               try {
-                return Unloader.wrap(
-                    registerRef.trackedInstance(() -> super.intersect(automaton)), registerRef);
+                return Unloader.wrap(super.intersect(automaton), sentinel);
               } finally {
-                registerRef.ensureReachability();
+                Reference.reachabilityFence(sentinel);
               }
             }
 
             @Override
             public TermsEnum termsEnum() throws IOException {
               try {
-                return Unloader.wrap(registerRef.trackedInstance(super::termsEnum), registerRef);
+                return Unloader.wrap(super.termsEnum(), sentinel);
               } finally {
-                registerRef.ensureReachability();
+                Reference.reachabilityFence(sentinel);
               }
             }
           };

@@ -20,6 +20,7 @@ import static org.apache.lucene.index.Unloader.FPIOFunction;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.lang.ref.Reference;
 import java.util.Iterator;
 import org.apache.lucene.codecs.DocValuesProducer;
 import org.apache.lucene.codecs.FieldsProducer;
@@ -89,7 +90,8 @@ public class UnloadingFieldsProducer extends FieldsProducer {
           iterator,
           null,
           true,
-          (raw, refTracker) -> {
+          (raw, sentinel) -> {
+            assert sentinel != null : "sentinel must not be null";
             return new Iterator<String>() {
               @Override
               public boolean hasNext() {
@@ -101,7 +103,7 @@ public class UnloadingFieldsProducer extends FieldsProducer {
                 try {
                   return raw.next();
                 } finally {
-                  refTracker.ensureReachability();
+                  Reference.reachabilityFence(sentinel);
                 }
               }
             };
@@ -120,7 +122,8 @@ public class UnloadingFieldsProducer extends FieldsProducer {
         terms,
         field,
         false,
-        (rawTerms, registerRef) -> {
+        (rawTerms, sentinel) -> {
+          assert sentinel != null : "sentinel must not be null";
           // NOTE: we have to wrap here because a reference to the raw value may be
           // retained internal to the backing `FieldsProducer`. This can generate a
           // profusion of redundant references that never get collected. This is a
@@ -133,9 +136,9 @@ public class UnloadingFieldsProducer extends FieldsProducer {
             @Override
             public TermsEnum iterator() throws IOException {
               try {
-                return Unloader.wrap(registerRef.trackedInstance(super::iterator), registerRef);
+                return Unloader.wrap(super.iterator(), sentinel);
               } finally {
-                registerRef.ensureReachability();
+                Reference.reachabilityFence(sentinel);
               }
             }
 
@@ -143,11 +146,9 @@ public class UnloadingFieldsProducer extends FieldsProducer {
             public TermsEnum intersect(CompiledAutomaton compiled, BytesRef startTerm)
                 throws IOException {
               try {
-                return Unloader.wrap(
-                    registerRef.trackedInstance(() -> super.intersect(compiled, startTerm)),
-                    registerRef);
+                return Unloader.wrap(super.intersect(compiled, startTerm), sentinel);
               } finally {
-                registerRef.ensureReachability();
+                Reference.reachabilityFence(sentinel);
               }
             }
 
@@ -156,7 +157,7 @@ public class UnloadingFieldsProducer extends FieldsProducer {
               try {
                 return super.size();
               } finally {
-                registerRef.ensureReachability();
+                Reference.reachabilityFence(sentinel);
               }
             }
 
@@ -165,7 +166,7 @@ public class UnloadingFieldsProducer extends FieldsProducer {
               try {
                 return super.getSumTotalTermFreq();
               } finally {
-                registerRef.ensureReachability();
+                Reference.reachabilityFence(sentinel);
               }
             }
 
@@ -174,7 +175,7 @@ public class UnloadingFieldsProducer extends FieldsProducer {
               try {
                 return super.getSumDocFreq();
               } finally {
-                registerRef.ensureReachability();
+                Reference.reachabilityFence(sentinel);
               }
             }
 
@@ -183,7 +184,7 @@ public class UnloadingFieldsProducer extends FieldsProducer {
               try {
                 return super.getDocCount();
               } finally {
-                registerRef.ensureReachability();
+                Reference.reachabilityFence(sentinel);
               }
             }
 
@@ -192,7 +193,7 @@ public class UnloadingFieldsProducer extends FieldsProducer {
               try {
                 return super.hasFreqs();
               } finally {
-                registerRef.ensureReachability();
+                Reference.reachabilityFence(sentinel);
               }
             }
 
@@ -201,7 +202,7 @@ public class UnloadingFieldsProducer extends FieldsProducer {
               try {
                 return super.hasOffsets();
               } finally {
-                registerRef.ensureReachability();
+                Reference.reachabilityFence(sentinel);
               }
             }
 
@@ -210,7 +211,7 @@ public class UnloadingFieldsProducer extends FieldsProducer {
               try {
                 return super.hasPositions();
               } finally {
-                registerRef.ensureReachability();
+                Reference.reachabilityFence(sentinel);
               }
             }
 
@@ -219,7 +220,7 @@ public class UnloadingFieldsProducer extends FieldsProducer {
               try {
                 return super.hasPayloads();
               } finally {
-                registerRef.ensureReachability();
+                Reference.reachabilityFence(sentinel);
               }
             }
 
@@ -228,7 +229,7 @@ public class UnloadingFieldsProducer extends FieldsProducer {
               try {
                 return super.getStats();
               } finally {
-                registerRef.ensureReachability();
+                Reference.reachabilityFence(sentinel);
               }
             }
 
@@ -237,7 +238,7 @@ public class UnloadingFieldsProducer extends FieldsProducer {
               try {
                 return super.getMin();
               } finally {
-                registerRef.ensureReachability();
+                Reference.reachabilityFence(sentinel);
               }
             }
 
@@ -246,7 +247,7 @@ public class UnloadingFieldsProducer extends FieldsProducer {
               try {
                 return super.getMax();
               } finally {
-                registerRef.ensureReachability();
+                Reference.reachabilityFence(sentinel);
               }
             }
           };

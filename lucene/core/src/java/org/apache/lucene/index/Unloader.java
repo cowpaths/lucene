@@ -22,12 +22,12 @@ import java.io.IOException;
 import java.io.PrintStream;
 import java.io.UncheckedIOException;
 import java.lang.ref.Reference;
-import java.lang.ref.ReferenceQueue;
 import java.lang.ref.WeakReference;
 import java.nio.charset.StandardCharsets;
+import java.util.AbstractMap;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
@@ -36,12 +36,9 @@ import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicLong;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.atomic.LongAdder;
-import java.util.function.Consumer;
-import java.util.function.IntUnaryOperator;
 import java.util.function.LongSupplier;
 import java.util.function.Supplier;
 import org.apache.lucene.codecs.DocValuesProducer;
@@ -54,7 +51,6 @@ import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.IOFunction;
 import org.apache.lucene.util.IOSupplier;
 import org.apache.lucene.util.InfoStream;
-import org.apache.lucene.util.RamUsageEstimator;
 import org.apache.lucene.util.ThreadInterruptedException;
 
 /** Handles thread-safe dynamic unloading and on-demand reloading of backing resource. */
@@ -62,7 +58,7 @@ public class Unloader<T extends Closeable> implements Closeable {
 
   private InfoStream out = InfoStream.getDefault();
 
-  private static final DelegateFuture<Closeable> CLOSED = new DelegateFuture<>(true, null, 0);
+  private static final DelegateFuture<Closeable> CLOSED = new DelegateFuture<>(null, null);
 
   static {
     CLOSED.complete(null);
@@ -81,8 +77,7 @@ public class Unloader<T extends Closeable> implements Closeable {
       implements Closeable {
     private final boolean unloading;
     private final WeakReference<DelegateFuture<T>> prev;
-    private final AtomicInteger refCount;
-    private final AtomicReference<Ref> sentinel;
+    private final AtomicReference<WeakReference<Object>> sentinel;
 
     @SuppressWarnings("unused")
     private volatile T strongRef;
@@ -122,11 +117,10 @@ public class Unloader<T extends Closeable> implements Closeable {
       }
     }
 
-    private DelegateFuture(boolean unloading, DelegateFuture<T> prev, int initialRefCount) {
-      this.unloading = unloading;
+    private DelegateFuture(Object initialSentinel, DelegateFuture<T> prev) {
+      this.unloading = initialSentinel == null;
       this.prev = new WeakReference<>(prev);
       if (unloading) {
-        this.refCount = null;
         this.sentinel = null;
         hardRef = prev;
         whenComplete(
@@ -139,8 +133,7 @@ public class Unloader<T extends Closeable> implements Closeable {
               }
             });
       } else {
-        refCount = new AtomicInteger(initialRefCount);
-        sentinel = new AtomicReference<>(INITIAL_SENTINEL);
+        sentinel = new AtomicReference<>(new WeakReference<>(initialSentinel));
       }
     }
 
@@ -148,17 +141,51 @@ public class Unloader<T extends Closeable> implements Closeable {
      * true if a reservation was acquired for this instance. Reservation release must be handled
      * elsewhere.
      */
-    private boolean acquire() {
-      return refCount.updateAndGet(ACQUIRE) > 0;
+    private Object acquire() {
+      Object ret;
+      boolean reusedSentinel = true;
+      WeakReference<Object> candidate = sentinel.get();
+      while ((ret = candidate.get()) == null) {
+        if (candidate == UNLOADED_REF) {
+          // unloaded while we're trying to acquire
+          return null;
+        }
+        ret = new Object();
+        WeakReference<Object> extant =
+            sentinel.compareAndExchange(candidate, new WeakReference<>(ret));
+        if (extant == candidate) {
+          reusedSentinel = false;
+          break;
+        } else {
+          candidate = extant;
+        }
+      }
+      if (reusedSentinel) {
+        INDIRECT_TRACK_COUNT.increment();
+      } else {
+        REFS_COLLECTED.increment();
+      }
+      return ret;
     }
 
     private boolean unload(boolean force) {
       assert !unloading;
       if (force) {
-        refCount.set(UNLOADED_REFCOUNT);
+        sentinel.set(UNLOADED_REF);
         return true;
       } else {
-        return refCount.updateAndGet(UNLOAD) == UNLOADED_REFCOUNT;
+        WeakReference<Object> candidate = sentinel.get();
+        for (; ; ) {
+          WeakReference<Object> extant;
+          if (candidate == UNLOADED_REF || candidate.get() != null) {
+            // either already unloaded, or still referenced
+            return false;
+          } else if ((extant = sentinel.compareAndExchange(candidate, UNLOADED_REF)) == candidate) {
+            return true;
+          } else {
+            candidate = extant;
+          }
+        }
       }
     }
 
@@ -169,19 +196,14 @@ public class Unloader<T extends Closeable> implements Closeable {
     }
   }
 
-  private static final Ref INITIAL_SENTINEL = new Ref(null, null, null, null);
+  private static final WeakReference<Object> UNLOADED_REF = new WeakReference<>(null);
 
   @SuppressWarnings("unchecked")
   private final DelegateFuture<T> closedSentinel = (DelegateFuture<T>) CLOSED;
 
-  private static final AtomicReference<Boolean> EXTERNAL_REFQUEUE_HANDLING =
-      new AtomicReference<>();
+  private static final LongAdder REFS_COLLECTED = new LongAdder();
 
-  private static final LongAdder OUTSTANDING_SIZE = new LongAdder();
-
-  private static final LongSupplier OUTSTANDING_SIZE_SUPPLIER = OUTSTANDING_SIZE::sum;
-
-  private static final Consumer<Object> REF_REMOVER = (r) -> remove((Ref) r);
+  private static final LongSupplier REFS_COLLECTED_COUNT_SUPPLIER = REFS_COLLECTED::sum;
 
   /**
    * Creates a new unloader to handle unloading and on-demand reloading a backing resource
@@ -203,35 +225,32 @@ public class Unloader<T extends Closeable> implements Closeable {
       long keepAliveNanos,
       IOFunction<T, String> receiveFirstInstance)
       throws IOException {
-    if (EXTERNAL_REFQUEUE_HANDLING.get() != Boolean.TRUE) {
+    if (INITIALIZED_EXTERNAL.compareAndSet(false, true)) {
       unloadHelper.maybeHandleRefQueues(
-          removeOutstanding,
-          REF_REMOVER,
-          EXTERNAL_REFQUEUE_HANDLING,
-          INDIRECT_TRACK_COUNT_SUPPLIER,
-          OUTSTANDING_SIZE_SUPPLIER);
+          INITIALIZED_EXTERNAL, INDIRECT_TRACK_COUNT_SUPPLIER, REFS_COLLECTED_COUNT_SUPPLIER);
     }
     this.reporter = unloadHelper;
     this.reopen = reopen;
     this.keepAliveNanos = keepAliveNanos;
-    DelegateFuture<T> holder = new DelegateFuture<>(false, null, 1);
+    Object sentinel = new Object();
+    DelegateFuture<T> holder = new DelegateFuture<>(sentinel, null);
+    backing = new AtomicReference<>(holder);
+    this.exec = unloadHelper.onCreation(this);
+    T in = reopen.apply(this);
     try {
-      backing = new AtomicReference<>(holder);
-      this.exec = unloadHelper.onCreation(this);
-      T in = reopen.apply(this);
-      try {
-        description = receiveFirstInstance.apply(in);
-        holder.completeStrong(in);
-      } catch (Throwable t) {
-        try (in) {
-          unloadHelper.onClose();
-          throw t;
-        }
+      description = receiveFirstInstance.apply(in);
+      holder.completeStrong(in);
+    } catch (Throwable t) {
+      try (in) {
+        unloadHelper.onClose();
+        throw t;
       }
     } finally {
-      holder.refCount.updateAndGet(RELEASE);
+      Reference.reachabilityFence(sentinel);
     }
   }
+
+  private static final AtomicBoolean INITIALIZED_EXTERNAL = new AtomicBoolean(false);
 
   /** Sets the infostream for {@link Unloader}. */
   public void setInfoStream(InfoStream out) {
@@ -257,15 +276,6 @@ public class Unloader<T extends Closeable> implements Closeable {
   /** This resource is still referenced, so was not unloaded. */
   public static final long STILL_REFERENCED = 0;
 
-  private static void drainRemoveOutstanding() {
-    for (ReferenceQueue<Object> q : removeOutstanding) {
-      Ref collected;
-      while ((collected = (Ref) q.poll()) != null) {
-        remove(collected);
-      }
-    }
-  }
-
   private final Random unloadRandom = new Random(); // single-threaded access
 
   private static boolean injectDelay(Random r, int oneIn, int millis) {
@@ -289,7 +299,7 @@ public class Unloader<T extends Closeable> implements Closeable {
         // still referenced
         return null;
       }
-      DelegateFuture<T> candidate = new DelegateFuture<>(true, extant, 0);
+      DelegateFuture<T> candidate = new DelegateFuture<>(null, extant);
       if (ref.compareAndSet(extant, candidate)) {
         return candidate;
       }
@@ -302,43 +312,48 @@ public class Unloader<T extends Closeable> implements Closeable {
     return null;
   }
 
-  private static <T extends Closeable> DelegateFuture<T> loadRef(
+  private static <T extends Closeable> Map.Entry<DelegateFuture<T>, Object> loadRef(
       AtomicReference<DelegateFuture<T>> ref, boolean[] weCompute) {
     DelegateFuture<T> extant;
-    while ((extant = ref.get()).unloading || !extant.acquire()) {
+    Object sentinel;
+    while ((extant = ref.get()).unloading || (sentinel = extant.acquire()) == null) {
       if (extant.unloading) {
         if (extant == CLOSED) {
           throw new AlreadyClosedException("");
         }
-        DelegateFuture<T> candidate = new DelegateFuture<>(false, extant, 1);
+        Object initialSentinel = new Object();
+        DelegateFuture<T> candidate = new DelegateFuture<>(initialSentinel, extant);
         if (ref.compareAndSet(extant, candidate)) {
           weCompute[0] = true;
-          return candidate;
+          return new AbstractMap.SimpleImmutableEntry<>(candidate, initialSentinel);
         }
       }
     }
     assert !extant.unloading;
-    return extant;
+    return new AbstractMap.SimpleImmutableEntry<>(extant, sentinel);
   }
 
-  private static <T extends Closeable> DelegateFuture<T> retry(
-      AtomicReference<DelegateFuture<T>> ref, DelegateFuture<T> replace, boolean[] weCompute) {
+  private static <T extends Closeable> Map.Entry<DelegateFuture<T>, Object> retry(
+      AtomicReference<DelegateFuture<T>> ref,
+      final DelegateFuture<T> replace,
+      boolean[] weCompute) {
     DelegateFuture<T> prev = replace.prev.get();
     if (prev == null) {
       replace.unload(true);
-      ref.compareAndSet(replace, new DelegateFuture<>(true, replace, 0));
+      ref.compareAndSet(replace, new DelegateFuture<>(null, replace));
       return loadRef(ref, weCompute);
     }
-    DelegateFuture<T> candidate = new DelegateFuture<>(false, prev, 1);
+    Object sentinel = new Object();
+    DelegateFuture<T> candidate = new DelegateFuture<>(sentinel, prev);
     DelegateFuture<T> extant = ref.compareAndExchange(replace, candidate);
     if (extant == replace) {
       weCompute[0] = true;
-      return candidate;
-    } else if (!extant.unloading && extant.acquire()) {
-      return extant;
+      return new AbstractMap.SimpleImmutableEntry<>(candidate, sentinel);
+    } else if (!extant.unloading && (sentinel = extant.acquire()) != null) {
+      return new AbstractMap.SimpleImmutableEntry<>(extant, sentinel);
     } else {
       replace.unload(true);
-      ref.compareAndSet(replace, new DelegateFuture<>(true, replace, 0));
+      ref.compareAndSet(replace, new DelegateFuture<>(null, replace));
       return loadRef(ref, weCompute);
     }
   }
@@ -354,7 +369,6 @@ public class Unloader<T extends Closeable> implements Closeable {
    * somewhere.
    */
   public long maybeUnload() throws IOException {
-    if (EXTERNAL_REFQUEUE_HANDLING.get() != Boolean.TRUE) drainRemoveOutstanding();
     long nanosSinceLastAccess = System.nanoTime() - lastAccessNanos;
     if (nanosSinceLastAccess < keepAliveNanos) {
       // don't unload
@@ -566,12 +580,10 @@ public class Unloader<T extends Closeable> implements Closeable {
   private static final class CloseableVal<T> implements Supplier<T>, Closeable {
 
     private final T val;
-    private final AtomicInteger refCount;
-    private final AtomicReference<Ref> sentinel;
+    private Object sentinel;
 
-    private CloseableVal(T val, AtomicInteger refCount, AtomicReference<Ref> sentinel) {
+    private CloseableVal(T val, Object sentinel) {
       this.val = val;
-      this.refCount = refCount;
       this.sentinel = sentinel;
     }
 
@@ -582,7 +594,12 @@ public class Unloader<T extends Closeable> implements Closeable {
 
     @Override
     public void close() throws IOException {
-      refCount.updateAndGet(RELEASE);
+      Object toRemove = sentinel;
+      try {
+        sentinel = null;
+      } finally {
+        Reference.reachabilityFence(toRemove);
+      }
     }
   }
 
@@ -590,19 +607,19 @@ public class Unloader<T extends Closeable> implements Closeable {
 
   private CloseableVal<T> backing() throws IOException {
     boolean[] weCompute = new boolean[1];
-    DelegateFuture<T> holder = loadRef(backing, weCompute);
+    Map.Entry<DelegateFuture<T>, Object> holder = loadRef(backing, weCompute);
     long now = System.nanoTime();
     long until = now + TOTAL_BLOCK_NANOS;
     while (!weCompute[0]) {
       try {
         return new CloseableVal<>(
-            holder.getStrong(until - now, TimeUnit.NANOSECONDS), holder.refCount, holder.sentinel);
+            holder.getKey().getStrong(until - now, TimeUnit.NANOSECONDS), holder.getValue());
       } catch (ExecutionException e) {
         Throwable t = e.getCause();
         if (t instanceof IOException) {
           throw (IOException) t;
         }
-        holder = retry(backing, holder, weCompute);
+        holder = retry(backing, holder.getKey(), weCompute);
       } catch (InterruptedException e) {
         throw new ThreadInterruptedException(e);
       } catch (
@@ -617,11 +634,11 @@ public class Unloader<T extends Closeable> implements Closeable {
     T candidate = null;
     try {
       candidate = reopen.apply(this);
-      holder.completeStrong(candidate);
+      holder.getKey().completeStrong(candidate);
       successfullyComputed = true;
-      return new CloseableVal<>(candidate, holder.refCount, holder.sentinel);
+      return new CloseableVal<>(candidate, holder.getValue());
     } catch (Throwable t) {
-      holder.completeExceptionally(t);
+      holder.getKey().completeExceptionally(t);
       throw t;
     } finally {
       if (candidate != null && !successfullyComputed) {
@@ -630,217 +647,18 @@ public class Unloader<T extends Closeable> implements Closeable {
     }
   }
 
-  // Arbitrary negative values that we won't hit accidentally
-  private static final int UNLOADED_REFCOUNT = ~(Integer.MAX_VALUE >> 1);
-  private static final int FORCE_UNLOADED_REFCOUNT = UNLOADED_REFCOUNT + 10;
-
-  private static final IntUnaryOperator ACQUIRE =
-      (extant) -> {
-        switch (extant) {
-          case FORCE_UNLOADED_REFCOUNT:
-            return FORCE_UNLOADED_REFCOUNT;
-          case UNLOADED_REFCOUNT:
-            return UNLOADED_REFCOUNT;
-          default:
-            assert extant >= 0;
-            return extant + 1;
-        }
-      };
-
-  private static final IntUnaryOperator RELEASE =
-      (extant) -> {
-        switch (extant) {
-          case FORCE_UNLOADED_REFCOUNT:
-            return FORCE_UNLOADED_REFCOUNT;
-          case UNLOADED_REFCOUNT:
-          case 0:
-            throw new IllegalStateException();
-          default:
-            assert extant > 0;
-            return extant - 1;
-        }
-      };
-
-  private static final IntUnaryOperator UNLOAD =
-      (extant) -> {
-        switch (extant) {
-          case FORCE_UNLOADED_REFCOUNT:
-            return FORCE_UNLOADED_REFCOUNT;
-          case UNLOADED_REFCOUNT:
-            throw new IllegalStateException("already unloaded");
-          case 0:
-            return UNLOADED_REFCOUNT;
-          default:
-            assert extant > 0;
-            return extant;
-        }
-      };
-
   private static final AtomicReference<List<String>> DEFERRED_INIT_MESSAGES =
       new AtomicReference<>(new ArrayList<>());
-
-  private static final int DEFAULT_PARALLEL_HEAD_FACTOR = 32;
-  private static final int PARALLEL_HEAD_FACTOR;
-
-  /**
-   * Setting this to false ensures even (round-robin) utilization of refqueues. Assigning by thread
-   * is fine at the time of refqueue <i>assignment</i>, but can yield hotspots that could increase
-   * thread contention at time of ref collection (by GC threads).
-   */
-  private static final boolean ASSIGN_REFQUEUE_BY_THREAD =
-      !"false".equals(System.getProperty("lucene.unload.assignRefQueueByThread"));
-
-  static {
-    List<String> deferred = DEFERRED_INIT_MESSAGES.get();
-    String spec = System.getProperty("lucene.unload.parallelRefQueueCount");
-    if (spec == null) {
-      PARALLEL_HEAD_FACTOR = DEFAULT_PARALLEL_HEAD_FACTOR;
-    } else {
-      int v;
-      try {
-        v = Integer.parseInt(spec);
-        if (v < 1 || Integer.bitCount(v) != 1) {
-          deferred.add("WARN: bad lucene.unload.parallelRefQueueCount spec: " + spec);
-          v = DEFAULT_PARALLEL_HEAD_FACTOR;
-        }
-      } catch (Throwable t) {
-        deferred.add(
-            "WARN: bad lucene.unload.parallelRefQueueCount spec: " + spec + " (" + t + ")");
-        v = DEFAULT_PARALLEL_HEAD_FACTOR;
-      }
-      PARALLEL_HEAD_FACTOR = v;
-    }
-    deferred.add("INFO: set static property PARALLEL_HEAD_FACTOR=" + PARALLEL_HEAD_FACTOR);
-    deferred.add(
-        "INFO: set static property ASSIGN_REFQUEUE_BY_THREAD=" + ASSIGN_REFQUEUE_BY_THREAD);
-  }
-
-  private static final int PARALLEL_HEAD_MASK = PARALLEL_HEAD_FACTOR - 1;
-
-  @SuppressWarnings({"unchecked", "rawtypes"})
-  private static final ReferenceQueue<Object>[] removeOutstanding =
-      new ReferenceQueue[PARALLEL_HEAD_FACTOR];
-
-  static {
-    for (int i = PARALLEL_HEAD_FACTOR - 1; i >= 0; i--) {
-      removeOutstanding[i] = new ReferenceQueue<>();
-    }
-  }
 
   private static final LongAdder INDIRECT_TRACK_COUNT = new LongAdder();
   private static final LongSupplier INDIRECT_TRACK_COUNT_SUPPLIER = INDIRECT_TRACK_COUNT::sum;
 
-  /**
-   * Number of ram bytes per instance of {@link Ref}. This can be used in conjunction with {@link
-   * #OUTSTANDING_SIZE_SUPPLIER} (accessed via the final arg to {@link
-   * UnloadHelper#maybeHandleRefQueues(ReferenceQueue[], Consumer, AtomicReference, LongSupplier,
-   * LongSupplier)}) to determine the point-in-time heap usage associated with refQueue reference
-   * tracking.
-   */
-  public static final long RAMBYTES_PER_REF =
-      RamUsageEstimator.shallowSizeOfInstance(Ref.class)
-          + RamUsageEstimator.shallowSizeOfInstance(AtomicReference.class);
-
-  private static final class Ref extends WeakReference<Object> {
-    private final AtomicInteger refCount;
-    private final AtomicReference<Ref> next = new AtomicReference<>();
-    private volatile Ref prev;
-
-    public Ref(
-        Object referent, ReferenceQueue<? super Object> q, AtomicInteger refCount, Ref prev) {
-      super(referent, q);
-      this.refCount = refCount;
-      this.prev = prev;
-    }
-  }
-
-  private static final Ref[] HEAD = new Ref[PARALLEL_HEAD_FACTOR];
-
-  static {
-    for (int i = PARALLEL_HEAD_FACTOR - 1; i >= 0; i--) {
-      HEAD[i] = new Ref(null, null, null, null);
-    }
-  }
-
-  private static final Ref RESERVED = new Ref(null, null, null, null);
-  private static final Ref REMOVED = new Ref(null, null, null, null);
-
-  private static final AtomicInteger ARBITRARY_REFQUEUE = new AtomicInteger();
-
-  private static Ref add(final Object o, AtomicInteger refCount) {
-    int parallelIdx;
-    if (ASSIGN_REFQUEUE_BY_THREAD) {
-      parallelIdx = Thread.currentThread().hashCode() & PARALLEL_HEAD_MASK;
-    } else {
-      parallelIdx = ARBITRARY_REFQUEUE.getAndIncrement() & PARALLEL_HEAD_MASK;
-    }
-    OUTSTANDING_SIZE.increment();
-    if (EXTERNAL_REFQUEUE_HANDLING.get() != Boolean.TRUE) drainRemoveOutstanding();
-    Ref head = HEAD[parallelIdx];
-    try {
-      final Ref ref = new Ref(o, removeOutstanding[parallelIdx], refCount, head);
-      Ref next = reserve(head, RESERVED);
-      if (next != null) {
-        next.prev = ref;
-        ref.next.set(next);
-      }
-      if (!head.next.compareAndSet(RESERVED, ref)) {
-        throw new IllegalStateException();
-      }
-      return ref;
-    } finally {
-      Reference.reachabilityFence(o);
-    }
-  }
-
-  private static Ref reserve(Ref ref, Ref reservation) {
-    Ref next = ref.next.get();
-    for (; ; ) {
-      while (next == RESERVED) {
-        if (reservation == REMOVED) {
-          Thread.yield();
-        }
-        next = ref.next.get();
-      }
-      Ref extant = ref.next.compareAndExchange(next, reservation);
-      if (extant == next) {
-        return next;
-      } else {
-        next = extant;
-      }
-    }
-  }
-
-  private static void remove(final Ref ref) {
-    Ref next = reserve(ref, REMOVED);
-    OUTSTANDING_SIZE.decrement();
-    ref.refCount.getAndUpdate(RELEASE);
-    // now we have a lock on the link to next
-    Ref prev;
-    for (; ; ) {
-      prev = ref.prev;
-      if (prev.next.compareAndSet(ref, RESERVED)) {
-        break;
-      } else {
-        Thread.yield();
-      }
-    }
-    // now we have a lock on the link from prev
-    if (next != null) {
-      next.prev = prev;
-    }
-    if (!prev.next.compareAndSet(RESERVED, next)) {
-      throw new IllegalStateException();
-    }
-  }
-
-  static PointValues.PointTree wrap(PointValues.PointTree pt, RefTracker registerRef)
-      throws IOException {
+  static PointValues.PointTree wrap(PointValues.PointTree pt, Object sentinel) throws IOException {
     return new PointValues.PointTree() {
       @Override
       public PointValues.PointTree clone() {
         try {
-          return wrap(registerRef.trackedInstance(pt::clone), registerRef);
+          return wrap(pt.clone(), sentinel);
         } catch (IOException e) {
           throw new UncheckedIOException("this should never happen", e);
         }
@@ -873,31 +691,35 @@ public class Unloader<T extends Closeable> implements Closeable {
 
       @Override
       public long size() {
-        try {
-          return pt.size();
-        } finally {
-          registerRef.ensureReachability();
-        }
+        return pt.size();
       }
 
       @Override
       public void visitDocIDs(PointValues.IntersectVisitor visitor) throws IOException {
-        pt.visitDocIDs(visitor);
+        try {
+          pt.visitDocIDs(visitor);
+        } finally {
+          Reference.reachabilityFence(sentinel);
+        }
       }
 
       @Override
       public void visitDocValues(PointValues.IntersectVisitor visitor) throws IOException {
-        pt.visitDocValues(visitor);
+        try {
+          pt.visitDocValues(visitor);
+        } finally {
+          Reference.reachabilityFence(sentinel);
+        }
       }
     };
   }
 
   private static final class TrackingPostingsEnum extends FilterLeafReader.FilterPostingsEnum {
-    private final RefTracker registerRef;
+    private final Object sentinel;
 
-    private TrackingPostingsEnum(PostingsEnum in, RefTracker registerRef) {
+    private TrackingPostingsEnum(PostingsEnum in, Object sentinel) {
       super(in);
-      this.registerRef = registerRef;
+      this.sentinel = sentinel;
     }
 
     @Override
@@ -905,18 +727,15 @@ public class Unloader<T extends Closeable> implements Closeable {
       try {
         return super.cost();
       } finally {
-        registerRef.ensureReachability();
+        Reference.reachabilityFence(sentinel);
       }
     }
   }
 
-  static TermsEnum wrap(TermsEnum te, RefTracker registerRef) throws IOException {
+  static TermsEnum wrap(TermsEnum te, Object sentinel) throws IOException {
     return new FilterLeafReader.FilterTermsEnum(te) {
       @Override
       public PostingsEnum postings(PostingsEnum reuse, int flags) throws IOException {
-        if (TRACK_ALL_REFS_DIRECTLY) {
-          return registerRef.trackedInstance(() -> super.postings(reuse, flags));
-        }
         INDIRECT_TRACK_COUNT.increment();
         if (reuse instanceof TrackingPostingsEnum) {
           PostingsEnum extantIn = ((TrackingPostingsEnum) reuse).in;
@@ -925,128 +744,83 @@ public class Unloader<T extends Closeable> implements Closeable {
             // same backing, with updated state
             return reuse;
           } else {
-            return new TrackingPostingsEnum(check, registerRef);
+            return new TrackingPostingsEnum(check, sentinel);
           }
         } else {
-          return new TrackingPostingsEnum(super.postings(reuse, flags), registerRef);
+          return new TrackingPostingsEnum(super.postings(reuse, flags), sentinel);
         }
       }
 
       @Override
       public ImpactsEnum impacts(int flags) throws IOException {
-        if (TRACK_ALL_REFS_DIRECTLY) {
-          return registerRef.trackedInstance(() -> super.impacts(flags));
-        } else {
-          INDIRECT_TRACK_COUNT.increment();
-          ImpactsEnum raw = super.impacts(flags);
-          return new ImpactsEnum() {
-            @Override
-            public void advanceShallow(int target) throws IOException {
-              raw.advanceShallow(target);
-            }
+        INDIRECT_TRACK_COUNT.increment();
+        ImpactsEnum raw = super.impacts(flags);
+        return new ImpactsEnum() {
+          @Override
+          public void advanceShallow(int target) throws IOException {
+            raw.advanceShallow(target);
+          }
 
-            @Override
-            public Impacts getImpacts() throws IOException {
-              return raw.getImpacts();
-            }
+          @Override
+          public Impacts getImpacts() throws IOException {
+            return raw.getImpacts();
+          }
 
-            @Override
-            public int freq() throws IOException {
-              return raw.freq();
-            }
+          @Override
+          public int freq() throws IOException {
+            return raw.freq();
+          }
 
-            @Override
-            public int nextPosition() throws IOException {
-              return raw.nextPosition();
-            }
+          @Override
+          public int nextPosition() throws IOException {
+            return raw.nextPosition();
+          }
 
-            @Override
-            public int startOffset() throws IOException {
-              return raw.startOffset();
-            }
+          @Override
+          public int startOffset() throws IOException {
+            return raw.startOffset();
+          }
 
-            @Override
-            public int endOffset() throws IOException {
-              return raw.endOffset();
-            }
+          @Override
+          public int endOffset() throws IOException {
+            return raw.endOffset();
+          }
 
-            @Override
-            public BytesRef getPayload() throws IOException {
-              return raw.getPayload();
-            }
+          @Override
+          public BytesRef getPayload() throws IOException {
+            return raw.getPayload();
+          }
 
-            @Override
-            public int docID() {
-              return raw.docID();
-            }
+          @Override
+          public int docID() {
+            return raw.docID();
+          }
 
-            @Override
-            public int nextDoc() throws IOException {
-              return raw.nextDoc();
-            }
+          @Override
+          public int nextDoc() throws IOException {
+            return raw.nextDoc();
+          }
 
-            @Override
-            public int advance(int target) throws IOException {
-              return raw.advance(target);
-            }
+          @Override
+          public int advance(int target) throws IOException {
+            return raw.advance(target);
+          }
 
-            @Override
-            public long cost() {
-              try {
-                return raw.cost();
-              } finally {
-                registerRef.ensureReachability();
-              }
+          @Override
+          public long cost() {
+            try {
+              return raw.cost();
+            } finally {
+              Reference.reachabilityFence(sentinel);
             }
-          };
-        }
+          }
+        };
       }
     };
   }
 
-  static final boolean TRACK_ALL_REFS_DIRECTLY =
-      "true".equals(System.getProperty("lucene.unload.trackAllRefsDirectly"));
-
-  static final class RefTracker {
-    private final Object topLevel;
-    private final AtomicInteger refCount;
-
-    RefTracker(Object topLevel, AtomicInteger refCount) {
-      this.topLevel = TRACK_ALL_REFS_DIRECTLY ? null : topLevel;
-      this.refCount = refCount;
-    }
-
-    <T> T trackedInstance(IOSupplier<T> supplier) throws IOException {
-      if (!TRACK_ALL_REFS_DIRECTLY) {
-        INDIRECT_TRACK_COUNT.increment();
-        return supplier.get();
-      }
-      refCount.getAndUpdate(ACQUIRE);
-      T ret;
-      try {
-        ret = supplier.get();
-      } catch (Throwable t) {
-        refCount.getAndUpdate(RELEASE);
-        throw t;
-      }
-      add(ret, refCount);
-      return ret;
-    }
-
-    /**
-     * Ensures that the top-level object (if present) is reachable.
-     *
-     * <p>Suppress warning; <i>this method</i> should only be called within a <code>finally</code>
-     * block.
-     */
-    @SuppressWarnings("ReachabilityFenceUsage")
-    void ensureReachability() {
-      Reference.reachabilityFence(topLevel);
-    }
-  }
-
   interface RefTrackShim<V> {
-    V shim(V in, RefTracker refTracker);
+    V shim(V in, Object sentinel);
   }
 
   <K, V> V execute(FPIOFunction<T, K, V> function, K arg) throws IOException {
@@ -1076,47 +850,12 @@ public class Unloader<T extends Closeable> implements Closeable {
       if (raw == null) {
         return null;
       } else {
-        AtomicInteger refCount = active.refCount;
-        AtomicReference<Ref> sentinel = active.sentinel;
-        Object tracked;
-        // TODO: here we assume indirect tracking, so direct tracking won't really work anymore.
-        //  fix to make this consistent
-        boolean reusedSentinel = true;
-        final Ref initial = sentinel.get();
-        Ref weak = initial;
-        while ((tracked = weak.get()) == null) {
-          if (weak != INITIAL_SENTINEL) {
-            // TODO: this double-remove can violate assumptions and cause IllegalStateException
-            //  upon release. Maybe not really a practical problem, but we won't fix this b/c
-            //  I think we can excise all the refqueue stuff.
-            remove(weak);
-          }
-          tracked = new Object();
-          Ref ref = add(tracked, refCount);
-          Ref extant = sentinel.compareAndExchange(weak, ref);
-          if (extant == weak) {
-            refCount.getAndUpdate(ACQUIRE);
-            reusedSentinel = false;
-            break;
-          } else {
-            remove(ref);
-            weak = extant;
-          }
-        }
-        if (reusedSentinel) {
-          INDIRECT_TRACK_COUNT.increment();
-        } else if (initial != INITIAL_SENTINEL && out.isEnabled("UN")) {
-          long extra = EXTRA_SENTINELS_CREATED.incrementAndGet();
-          out.message("UN", "INFO: total additional sentinels created: " + extra);
-        }
-        return shim.shim(raw, new RefTracker(tracked, refCount));
+        return shim.shim(raw, active.sentinel);
       }
     } finally {
       lastAccessNanos = System.nanoTime();
     }
   }
-
-  private static final AtomicLong EXTRA_SENTINELS_CREATED = new AtomicLong();
 
   interface FPIOFunction<T, K, V> {
     V apply(T fp, K arg) throws IOException;
@@ -1232,16 +971,6 @@ public class Unloader<T extends Closeable> implements Closeable {
     }
   }
 
-  // visible for testing
-  static int nonEmptyRefQueueHeadCount() {
-    return Math.toIntExact(Arrays.stream(HEAD).filter((r) -> r.next.get() != null).count());
-  }
-
-  // visible for testing
-  static void addDummyReference(int byteSize) {
-    add(new byte[byteSize], new AtomicInteger(1));
-  }
-
   /**
    * Passed to {@link Unloader#Unloader(UnloadHelper, IOFunction, long, IOFunction)} ctor. This
    * provides a means for reporting unload/reload lifecycle events to higher-level components. This
@@ -1249,8 +978,8 @@ public class Unloader<T extends Closeable> implements Closeable {
    * the underlying components that handle load/unload according to framework lifecycles.
    *
    * <p>e.g., framework may supply its own {@link ScheduledExecutorService} for running unload
-   * checks, and may (via {@link #maybeHandleRefQueues(ReferenceQueue[], Consumer, AtomicReference,
-   * LongSupplier, LongSupplier)} manage the handling of reference tracking as well.
+   * checks, and may (via {@link #maybeHandleRefQueues(AtomicBoolean, LongSupplier, LongSupplier)}
+   * manage the handling of reference tracking as well.
    */
   public interface UnloadHelper {
     /**
@@ -1290,22 +1019,16 @@ public class Unloader<T extends Closeable> implements Closeable {
      * A callback that allows a framework to handle refQueue management (and provides a window into
      * the size of the refQueue(s) for metrics purposes.
      *
-     * @param queues refQueue instances
-     * @param handler to be called for each {@link java.lang.ref.Reference} removed from a refQueue
-     * @param handleRefQueue implementations should update this to <code>true</code> if they plan to
-     *     handle the refQueues, and should set it back to <code>false</code> if/when they stop
-     *     handling any of the provided refQueues.
+     * <p>handle the refQueues, and should set it back to <code>false</code> if/when they stop
+     * handling any of the provided refQueues.
+     *
      * @param indirectTrackedCount for metrics; the number of references not tracked directly, but
      *     tracked via reference to top-level tracked object.
-     * @param outstandingSize for metrics; the number of references tracked but not yet collected
-     *     off a refQueue.
      */
     default void maybeHandleRefQueues(
-        ReferenceQueue<Object>[] queues,
-        Consumer<Object> handler,
-        AtomicReference<Boolean> handleRefQueue,
-        LongSupplier indirectTrackedCount,
-        LongSupplier outstandingSize) {}
+        AtomicBoolean initialized, LongSupplier indirectTrackedCount, LongSupplier refsCollected) {
+      // no-op default impl
+    }
     ;
   }
 
@@ -1335,19 +1058,6 @@ public class Unloader<T extends Closeable> implements Closeable {
       this.infoStream = null;
       return ret;
     }
-  }
-
-  /**
-   * For testing; provides a hook so that tests of refQueue functionality may directly manage
-   * refQueue handling.
-   */
-  static void configure(UnloadHelper unloadHelper) {
-    unloadHelper.maybeHandleRefQueues(
-        removeOutstanding,
-        REF_REMOVER,
-        EXTERNAL_REFQUEUE_HANDLING,
-        INDIRECT_TRACK_COUNT_SUPPLIER,
-        OUTSTANDING_SIZE_SUPPLIER);
   }
 
   /**
@@ -1549,14 +1259,5 @@ public class Unloader<T extends Closeable> implements Closeable {
       }
       return null;
     };
-  }
-
-  /**
-   * Analogous to {@link Runnable}, but the {@link #run()} method throws {@link
-   * InterruptedException}.
-   */
-  public interface BlockingRunnable {
-    /** Executes this task, possibly throwing {@link InterruptedException}. */
-    void run() throws InterruptedException;
   }
 }
