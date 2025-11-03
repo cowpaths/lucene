@@ -77,7 +77,7 @@ public class UnloadingFieldsProducer extends FieldsProducer {
 
   @Override
   public void checkIntegrity() throws IOException {
-    u.execute(checkIntegrity, null);
+    u.execute(checkIntegrity);
   }
 
   private final FPIOFunction<FieldsProducer, String, Iterator<String>> iterator =
@@ -89,7 +89,6 @@ public class UnloadingFieldsProducer extends FieldsProducer {
       return u.execute(
           iterator,
           null,
-          true,
           (raw, sentinel) -> {
             assert sentinel != null : "sentinel must not be null";
             return new Iterator<String>() {
@@ -121,7 +120,6 @@ public class UnloadingFieldsProducer extends FieldsProducer {
     return u.execute(
         terms,
         field,
-        false,
         (rawTerms, sentinel) -> {
           assert sentinel != null : "sentinel must not be null";
           // NOTE: we have to wrap here because a reference to the raw value may be

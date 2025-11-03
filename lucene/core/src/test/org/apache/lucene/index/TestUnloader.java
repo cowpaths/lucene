@@ -138,8 +138,7 @@ public class TestUnloader extends LuceneTestCase {
                             (a, b) -> {
                               a.count.incrementAndGet();
                               return null;
-                            },
-                            null);
+                            });
                     check.increment();
                   }
                   return "execute";

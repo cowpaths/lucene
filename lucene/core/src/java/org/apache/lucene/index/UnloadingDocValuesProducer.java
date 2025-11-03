@@ -61,7 +61,7 @@ public class UnloadingDocValuesProducer extends DocValuesProducer {
 
   @Override
   public void checkIntegrity() throws IOException {
-    u.execute(checkIntegrity, null);
+    u.execute(checkIntegrity);
   }
 
   private final FPIOFunction<DocValuesProducer, FieldInfo, NumericDocValues> getNumeric =
@@ -72,7 +72,6 @@ public class UnloadingDocValuesProducer extends DocValuesProducer {
     return u.execute(
         getNumeric,
         field,
-        true,
         (raw, sentinel) -> {
           assert sentinel != null : "sentinel must not be null";
           return new FilterNumericDocValues(raw) {
@@ -96,7 +95,6 @@ public class UnloadingDocValuesProducer extends DocValuesProducer {
     return u.execute(
         getBinary,
         field,
-        true,
         (raw, sentinel) -> {
           assert sentinel != null : "sentinel must not be null";
           return new FilterBinaryDocValues(raw) {
@@ -120,7 +118,6 @@ public class UnloadingDocValuesProducer extends DocValuesProducer {
     return u.execute(
         getSorted,
         field,
-        true,
         (rawSorted, sentinel) -> {
           assert sentinel != null : "sentinel must not be null";
           // wrap so that we can track refs for returned `TermsEnum` instances
@@ -146,7 +143,6 @@ public class UnloadingDocValuesProducer extends DocValuesProducer {
     return u.execute(
         getSortedNumeric,
         field,
-        true,
         (raw, sentinel) -> {
           assert sentinel != null : "sentinel must not be null";
           return new FilterSortedNumericDocValues(raw) {
@@ -170,7 +166,6 @@ public class UnloadingDocValuesProducer extends DocValuesProducer {
     return u.execute(
         getSortedSet,
         field,
-        true,
         (rawSorted, sentinel) -> {
           assert sentinel != null : "sentinel must not be null";
           // wrap so that we can track refs for returned `TermsEnum` instances

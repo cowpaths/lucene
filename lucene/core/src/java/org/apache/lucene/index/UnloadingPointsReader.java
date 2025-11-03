@@ -61,7 +61,7 @@ public class UnloadingPointsReader extends PointsReader {
 
   @Override
   public void checkIntegrity() throws IOException {
-    u.execute(checkIntegrity, null);
+    u.execute(checkIntegrity);
   }
 
   private final FPIOFunction<PointsReader, String, PointValues> getValues = PointsReader::getValues;
@@ -71,7 +71,6 @@ public class UnloadingPointsReader extends PointsReader {
     return u.execute(
         getValues,
         field,
-        false,
         (rawPointValues, sentinel) -> {
           assert sentinel != null : "sentinel must not be null!";
           // NOTE: we have to wrap here in order to track derived `PointTree` instances

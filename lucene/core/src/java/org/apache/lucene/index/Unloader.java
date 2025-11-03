@@ -823,8 +823,8 @@ public class Unloader<T extends Closeable> implements Closeable {
     V shim(V in, Object sentinel);
   }
 
-  <K, V> V execute(FPIOFunction<T, K, V> function, K arg) throws IOException {
-    return execute(function, arg, true, null);
+  <K, V> V execute(FPIOFunction<T, K, V> function) throws IOException {
+    return execute(function, null, null);
   }
 
   /**
@@ -842,9 +842,7 @@ public class Unloader<T extends Closeable> implements Closeable {
    * collecting the wrapper and unloading the resource after entering the shim method, but before
    * completing the call to the raw/backing method.
    */
-  <K, V> V execute(
-      FPIOFunction<T, K, V> function, K arg, boolean trackRawUnused, RefTrackShim<V> shim)
-      throws IOException {
+  <K, V> V execute(FPIOFunction<T, K, V> function, K arg, RefTrackShim<V> shim) throws IOException {
     try (CloseableVal<T> active = backing()) {
       V raw = function.apply(active.get(), arg);
       if (raw == null) {
