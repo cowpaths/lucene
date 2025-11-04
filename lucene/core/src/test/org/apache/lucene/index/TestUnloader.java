@@ -83,7 +83,7 @@ public class TestUnloader extends LuceneTestCase {
     }
   }
 
-  private static final IOFunction<MyCloseable, String> NO_OP = (c) -> null;
+  private static final IOFunction<MyCloseable, String> NO_OP = Object::toString;
 
   public void test() throws IOException, InterruptedException {
     for (int i = 0; i < 10; i++) {

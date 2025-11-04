@@ -1007,7 +1007,7 @@ public class Unloader<T extends Closeable> implements Closeable {
      *     reload
      * @param loadTime how long did it take to load this resource (nanos)
      */
-    default void onLoad(long nanosSincePriorAccess, long loadTime) {}
+    default void onLoad(long nanosSincePriorAccess, long loadTime, boolean initial) {}
 
     /**
      * Called for each unload of backing resource
@@ -1039,6 +1039,15 @@ public class Unloader<T extends Closeable> implements Closeable {
       // no-op default impl
     }
 
+    /**
+     * Allows this {@link UnloadHelper} to defer the unloading of the associated resource. This is
+     * usually used in conjunction with tracking historical behavior of the resource, and may be
+     * used to avoid thrashing.
+     *
+     * @param nanosSinceLastAccess number of nanos since last access of the associated resource
+     * @return If positive (<code>&gt; 0</code>), represents the number of nanos that unloading
+     *     should be deferred (if <code>&lt;= 0</code>, unloading will not be deferred).
+     */
     default long deferUnload(long nanosSinceLastAccess) {
       return -1;
     }
@@ -1118,7 +1127,8 @@ public class Unloader<T extends Closeable> implements Closeable {
               throw t;
             }
           }
-          u.reporter.onLoad(start - u.lastAccessNanos, System.nanoTime() - start);
+          u.reporter.onLoad(
+              start - u.lastAccessNanos, System.nanoTime() - start, u.description == null);
           return pr;
         },
         KEEP_ALIVE_NANOS);
@@ -1170,7 +1180,8 @@ public class Unloader<T extends Closeable> implements Closeable {
               throw t;
             }
           }
-          u.reporter.onLoad(start - u.lastAccessNanos, System.nanoTime() - start);
+          u.reporter.onLoad(
+              start - u.lastAccessNanos, System.nanoTime() - start, u.description == null);
           return fp;
         },
         KEEP_ALIVE_NANOS);
@@ -1222,7 +1233,8 @@ public class Unloader<T extends Closeable> implements Closeable {
               throw t;
             }
           }
-          u.reporter.onLoad(start - u.lastAccessNanos, System.nanoTime() - start);
+          u.reporter.onLoad(
+              start - u.lastAccessNanos, System.nanoTime() - start, u.description == null);
           return dvp;
         },
         KEEP_ALIVE_NANOS);
