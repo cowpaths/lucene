@@ -370,9 +370,12 @@ public class Unloader<T extends Closeable> implements Closeable {
    */
   public long maybeUnload() throws IOException {
     long nanosSinceLastAccess = System.nanoTime() - lastAccessNanos;
+    long deferNanos;
     if (nanosSinceLastAccess < keepAliveNanos) {
       // don't unload
       return keepAliveNanos - nanosSinceLastAccess;
+    } else if ((deferNanos = reporter.deferUnload(nanosSinceLastAccess)) > 0) {
+      return deferNanos;
     }
     final boolean[] unloaded = new boolean[1];
     DelegateFuture<T> holder = unloadRef(backing, unloaded);
@@ -871,7 +874,7 @@ public class Unloader<T extends Closeable> implements Closeable {
    * Time threshold at which a resource becomes eligible for unloading. Set this very low (0 or 1)
    * for stress testing.
    */
-  private static final long KEEP_ALIVE_NANOS;
+  public static final long KEEP_ALIVE_NANOS;
 
   private static final String DEFAULT_KEEP_ALIVE_SPEC = "60m";
   private static final long DEFAULT_KEEP_ALIVE_NANOS = TimeUnit.MINUTES.toNanos(60);
@@ -1027,7 +1030,10 @@ public class Unloader<T extends Closeable> implements Closeable {
         AtomicBoolean initialized, LongSupplier indirectTrackedCount, LongSupplier refsCollected) {
       // no-op default impl
     }
-    ;
+
+    default long deferUnload(long nanosSinceLastAccess) {
+      return -1;
+    }
   }
 
   /**
