@@ -364,7 +364,7 @@ public class Unloader<T extends Closeable> implements Closeable {
    * behavior may be disabled by setting sysprop to false.
    */
   public static final boolean ADAPTIVE_DEFER =
-      !"false".equals(System.getProperty("lucene.ttl.adaptiveDefer"));
+      !"false".equals(System.getProperty("lucene.unload.adaptiveDefer"));
 
   /**
    * Conditionally unloads (closes) the delegate {@link FieldsProducer}. Returns {@link #UNLOADED}
