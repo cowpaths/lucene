@@ -359,6 +359,14 @@ public class Unloader<T extends Closeable> implements Closeable {
   }
 
   /**
+   * Defaults to true; if true, allows {@link #reporter} to defer unloading (e.g., based on
+   * historical context, to avoid thrashing) via {@link UnloadHelper#deferUnload(long)}. This
+   * behavior may be disabled by setting sysprop to false.
+   */
+  public static final boolean ADAPTIVE_DEFER =
+      !"false".equals(System.getProperty("lucene.ttl.adaptiveDefer"));
+
+  /**
    * Conditionally unloads (closes) the delegate {@link FieldsProducer}. Returns {@link #UNLOADED}
    * if resources were unloaded, otherwise returns the number of nanos remaining until the resources
    * might be eligible for unloading.
@@ -374,7 +382,7 @@ public class Unloader<T extends Closeable> implements Closeable {
     if (nanosSinceLastAccess < keepAliveNanos) {
       // don't unload
       return keepAliveNanos - nanosSinceLastAccess;
-    } else if ((deferNanos = reporter.deferUnload(nanosSinceLastAccess)) > 0) {
+    } else if (ADAPTIVE_DEFER && (deferNanos = reporter.deferUnload(nanosSinceLastAccess)) > 0) {
       return deferNanos;
     }
     final boolean[] unloaded = new boolean[1];
