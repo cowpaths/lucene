@@ -936,48 +936,49 @@ public class Unloader<T extends Closeable> implements Closeable {
       String syspropName, String defaultSpec, long defaultNanos, List<String> deferred) {
     try {
       String unloadSpec = System.getProperty(syspropName, defaultSpec);
-      int endIdx = unloadSpec.length() - 1;
-      if (unloadSpec.isEmpty()) {
-        deferred.add("WARN: empty " + syspropName + " spec");
+      try {
+        return getNanos(unloadSpec);
+      } catch (IllegalArgumentException ex) {
+        deferred.add("WARN: bad " + syspropName + " spec: " + unloadSpec + " " + ex);
         return defaultNanos;
-      } else {
-        TimeUnit t;
-        char c = unloadSpec.charAt(endIdx);
-        switch (c) {
-          case 's':
-            t = TimeUnit.SECONDS;
-            break;
-          case 'm':
-            t = TimeUnit.MINUTES;
-            break;
-          case 'h':
-            t = TimeUnit.HOURS;
-            break;
-          case 'd':
-            t = TimeUnit.DAYS;
-            break;
-          default:
-            if (c >= '0' && c <= '9') {
-              endIdx++;
-              t = TimeUnit.MILLISECONDS;
-            } else {
-              deferred.add("WARN: bad " + syspropName + " spec: " + unloadSpec);
-              return defaultNanos;
-            }
-        }
-        try {
-          int v = Integer.parseInt(unloadSpec, 0, endIdx, 10);
-          return t.toNanos(v);
-        } catch (NumberFormatException ex) {
-          deferred.add("WARN: bad " + syspropName + " spec: " + unloadSpec + " " + ex);
-          throw ex;
-        }
       }
     } catch (
         @SuppressWarnings("unused")
         Exception ex) {
       return defaultNanos;
     }
+  }
+
+  public static long getNanos(String unloadSpec) {
+    if (unloadSpec.isEmpty()) {
+      throw new IllegalArgumentException("empty unloadSpec");
+    }
+    int endIdx = unloadSpec.length() - 1;
+    TimeUnit t;
+    char c = unloadSpec.charAt(endIdx);
+    switch (c) {
+      case 's':
+        t = TimeUnit.SECONDS;
+        break;
+      case 'm':
+        t = TimeUnit.MINUTES;
+        break;
+      case 'h':
+        t = TimeUnit.HOURS;
+        break;
+      case 'd':
+        t = TimeUnit.DAYS;
+        break;
+      default:
+        if (c >= '0' && c <= '9') {
+          endIdx++;
+          t = TimeUnit.MILLISECONDS;
+        } else {
+          throw new IllegalArgumentException("expected plain numeric arg (millis)");
+        }
+    }
+    int v = Integer.parseInt(unloadSpec, 0, endIdx, 10);
+    return t.toNanos(v);
   }
 
   /**
