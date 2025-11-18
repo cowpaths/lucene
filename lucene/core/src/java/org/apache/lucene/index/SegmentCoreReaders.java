@@ -117,9 +117,14 @@ final class SegmentCoreReaders {
       if (coreFieldInfos.hasPostings()) {
         final PostingsFormat format = codec.postingsFormat();
         // Ask codec for its Fields
-        fields =
-            Unloader.fieldsProducer(
-                () -> format.fieldsProducer(segmentReadState), dir, segmentReadState);
+        if (format instanceof Unloader.UnloadAware
+            && ((Unloader.UnloadAware) format).disableUnload(segmentReadState)) {
+          fields = format.fieldsProducer(segmentReadState);
+        } else {
+          fields =
+              Unloader.fieldsProducer(
+                  () -> format.fieldsProducer(segmentReadState), dir, segmentReadState);
+        }
         assert fields != null;
       } else {
         fields = null;
@@ -153,8 +158,13 @@ final class SegmentCoreReaders {
 
       if (coreFieldInfos.hasPointValues()) {
         PointsFormat pf = codec.pointsFormat();
-        pointsReader =
-            Unloader.pointsReader(() -> pf.fieldsReader(segmentReadState), dir, segmentReadState);
+        if (pf instanceof Unloader.UnloadAware
+            && ((Unloader.UnloadAware) pf).disableUnload(segmentReadState)) {
+          pointsReader = pf.fieldsReader(segmentReadState);
+        } else {
+          pointsReader =
+              Unloader.pointsReader(() -> pf.fieldsReader(segmentReadState), dir, segmentReadState);
+        }
       } else {
         pointsReader = null;
       }

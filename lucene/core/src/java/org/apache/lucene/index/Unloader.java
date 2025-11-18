@@ -1142,6 +1142,21 @@ public class Unloader<T extends Closeable> implements Closeable {
   }
 
   /**
+   * To be implemented by components ({@link org.apache.lucene.codecs.PostingsFormat}, {@link
+   * org.apache.lucene.codecs.DocValuesFormat} or {@link org.apache.lucene.codecs.PointsFormat})
+   * that are aware of resource unloading and need to be able to prevent unloading of associated
+   * resources.
+   */
+  public interface UnloadAware {
+    /**
+     * If this method returns {@code true}, unloading of associated resources should be disabled.
+     */
+    default boolean disableUnload(SegmentReadState state) {
+      return true;
+    }
+  }
+
+  /**
    * Returns a {@link FieldsProducer} over the specified {@link SegmentReadState}, conditionally
    * wrapped to allow dynamic unloading and on-demand reloading of the backing resource.
    *
