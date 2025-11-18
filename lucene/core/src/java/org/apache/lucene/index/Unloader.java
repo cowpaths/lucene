@@ -949,6 +949,12 @@ public class Unloader<T extends Closeable> implements Closeable {
     }
   }
 
+  /**
+   * Returns the number of nanoseconds represented by the specified string spec.
+   *
+   * <p>The spec may be suffixed with "s" (seconds), "m" (minutes), "h" (hours), or "d" (days). If
+   * unsuffixed (a straight numeric value), the spec is interpreted as milliseconds.
+   */
   public static long getNanos(String unloadSpec) {
     if (unloadSpec.isEmpty()) {
       throw new IllegalArgumentException("empty unloadSpec");
