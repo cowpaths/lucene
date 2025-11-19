@@ -37,6 +37,7 @@ import org.apache.lucene.index.SegmentWriteState;
 import org.apache.lucene.index.SortedDocValues;
 import org.apache.lucene.index.SortedNumericDocValues;
 import org.apache.lucene.index.SortedSetDocValues;
+import org.apache.lucene.index.Unloader;
 import org.apache.lucene.util.IOUtils;
 
 /**
@@ -300,9 +301,17 @@ public abstract class PerFieldDocValuesFormat extends DocValuesFormat {
               String segmentSuffix =
                   getFullSegmentSuffix(readState.segmentSuffix, getSuffix(formatName, suffix));
               if (!formats.containsKey(segmentSuffix)) {
-                formats.put(
-                    segmentSuffix,
-                    format.fieldsProducer(new SegmentReadState(readState, segmentSuffix)));
+                SegmentReadState srs = new SegmentReadState(readState, segmentSuffix);
+                DocValuesProducer dvp;
+                if (format instanceof Unloader.UnloadAware
+                    && ((Unloader.UnloadAware) format).disableUnload(srs)) {
+                  dvp = format.fieldsProducer(srs);
+                } else {
+                  dvp =
+                      Unloader.docValuesProducer(
+                          () -> format.fieldsProducer(srs), srs.segmentInfo.dir, srs);
+                }
+                formats.put(segmentSuffix, dvp);
               }
               fields.put(fieldName, formats.get(segmentSuffix));
             }

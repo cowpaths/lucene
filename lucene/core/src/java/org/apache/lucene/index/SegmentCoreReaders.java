@@ -117,14 +117,7 @@ final class SegmentCoreReaders {
       if (coreFieldInfos.hasPostings()) {
         final PostingsFormat format = codec.postingsFormat();
         // Ask codec for its Fields
-        if (format instanceof Unloader.UnloadAware
-            && ((Unloader.UnloadAware) format).disableUnload(segmentReadState)) {
-          fields = format.fieldsProducer(segmentReadState);
-        } else {
-          fields =
-              Unloader.fieldsProducer(
-                  () -> format.fieldsProducer(segmentReadState), dir, segmentReadState);
-        }
+        fields = format.fieldsProducer(segmentReadState);
         assert fields != null;
       } else {
         fields = null;

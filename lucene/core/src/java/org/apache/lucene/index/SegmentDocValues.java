@@ -49,14 +49,7 @@ final class SegmentDocValues {
     SegmentReadState srs =
         new SegmentReadState(dvDir, si.info, infos, IOContext.READ, segmentSuffix);
     DocValuesFormat dvFormat = si.info.getCodec().docValuesFormat();
-    DocValuesProducer dvp;
-    if (dvFormat instanceof Unloader.UnloadAware
-        && ((Unloader.UnloadAware) dvFormat).disableUnload(srs)) {
-      dvp = dvFormat.fieldsProducer(srs);
-    } else {
-      dvp = Unloader.docValuesProducer(() -> dvFormat.fieldsProducer(srs), si.info.dir, srs);
-    }
-    return new RefCount<DocValuesProducer>(dvp) {
+    return new RefCount<DocValuesProducer>(dvFormat.fieldsProducer(srs)) {
       @SuppressWarnings("synthetic-access")
       @Override
       protected void release() throws IOException {
