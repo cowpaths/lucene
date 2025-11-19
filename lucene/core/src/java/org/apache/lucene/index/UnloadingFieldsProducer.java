@@ -115,8 +115,19 @@ public class UnloadingFieldsProducer extends FieldsProducer {
 
   private final FPIOFunction<FieldsProducer, String, Terms> terms = Fields::terms;
 
+  public static final ThreadLocal<String> FIELD_REQUESTED = new ThreadLocal<>();
+
   @Override
   public Terms terms(String field) throws IOException {
+    try {
+      FIELD_REQUESTED.set(field);
+      return terms0(field);
+    } finally {
+      FIELD_REQUESTED.remove();
+    }
+  }
+
+  private Terms terms0(String field) throws IOException {
     return u.execute(
         terms,
         field,
