@@ -46,6 +46,7 @@ import org.apache.lucene.codecs.FieldsProducer;
 import org.apache.lucene.codecs.PointsReader;
 import org.apache.lucene.store.AlreadyClosedException;
 import org.apache.lucene.store.Directory;
+import org.apache.lucene.store.IOContext;
 import org.apache.lucene.store.UnloaderCoordinationPoint;
 import org.apache.lucene.util.BytesRef;
 import org.apache.lucene.util.IOFunction;
@@ -1058,6 +1059,10 @@ public class Unloader<T extends Closeable> implements Closeable {
     default long deferUnload(long nanosSinceLastAccess) {
       return -1;
     }
+
+    default boolean disableUnload(Class<?> resourceClass, SegmentReadState srs) {
+      return false;
+    }
   }
 
   /**
@@ -1088,6 +1093,10 @@ public class Unloader<T extends Closeable> implements Closeable {
     }
   }
 
+  private static boolean disableUnload(SegmentReadState srs) {
+    return srs.context.context == IOContext.Context.MERGE || !srs.segmentInfo.getUseCompoundFile();
+  }
+
   /**
    * Returns a {@link PointsReader} over the specified {@link SegmentReadState}, conditionally
    * wrapped to allow dynamic unloading and on-demand reloading of the backing resource.
@@ -1106,10 +1115,10 @@ public class Unloader<T extends Closeable> implements Closeable {
   public static PointsReader pointsReader(
       IOSupplier<PointsReader> open, Directory dir, SegmentReadState srs) throws IOException {
     UnloadHelper unloadHelper;
-    if (srs.context.mergeInfo != null
-        || srs.context.flushInfo != null
+    if (disableUnload(srs)
         || DISABLE
-        || (unloadHelper = UnloaderCoordinationPoint.getUnloadHelper(dir)) == null) {
+        || (unloadHelper = UnloaderCoordinationPoint.getUnloadHelper(dir)) == null
+        || unloadHelper.disableUnload(PointsReader.class, srs)) {
       return open.get();
     }
     String type = PointsReader.class.getSimpleName();
@@ -1174,10 +1183,10 @@ public class Unloader<T extends Closeable> implements Closeable {
   public static FieldsProducer fieldsProducer(
       IOSupplier<FieldsProducer> open, Directory dir, SegmentReadState srs) throws IOException {
     UnloadHelper unloadHelper;
-    if (srs.context.mergeInfo != null
-        || srs.context.flushInfo != null
+    if (disableUnload(srs)
         || DISABLE
-        || (unloadHelper = UnloaderCoordinationPoint.getUnloadHelper(dir)) == null) {
+        || (unloadHelper = UnloaderCoordinationPoint.getUnloadHelper(dir)) == null
+        || unloadHelper.disableUnload(FieldsProducer.class, srs)) {
       return open.get();
     }
     String type = FieldsProducer.class.getSimpleName();
@@ -1227,10 +1236,10 @@ public class Unloader<T extends Closeable> implements Closeable {
   public static DocValuesProducer docValuesProducer(
       IOSupplier<DocValuesProducer> open, Directory dir, SegmentReadState srs) throws IOException {
     UnloadHelper unloadHelper;
-    if (srs.context.mergeInfo != null
-        || srs.context.flushInfo != null
+    if (disableUnload(srs)
         || DISABLE
-        || (unloadHelper = UnloaderCoordinationPoint.getUnloadHelper(dir)) == null) {
+        || (unloadHelper = UnloaderCoordinationPoint.getUnloadHelper(dir)) == null
+        || unloadHelper.disableUnload(DocValuesProducer.class, srs)) {
       return open.get();
     }
     String type = DocValuesProducer.class.getSimpleName();
