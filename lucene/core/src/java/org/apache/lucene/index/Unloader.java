@@ -1094,7 +1094,7 @@ public class Unloader<T extends Closeable> implements Closeable {
   }
 
   private static boolean disableUnload(SegmentReadState srs) {
-    return srs.context.context == IOContext.Context.MERGE || !srs.segmentInfo.getUseCompoundFile();
+    return srs.context.context == IOContext.Context.MERGE;
   }
 
   /**
