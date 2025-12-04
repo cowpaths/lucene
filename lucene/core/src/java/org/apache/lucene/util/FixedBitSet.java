@@ -56,6 +56,7 @@ public final class FixedBitSet extends BitSet {
    * </ul>
    */
   public static final int WORDS_SHIFT;
+  private static final int DEFAULT_MAX_WORDS_SHIFT = 17;
   static {
     // here we work based on the assumption that the min and max heap sizes will be the same, and
     // will guide the heap region sizing
@@ -63,13 +64,20 @@ public final class FixedBitSet extends BitSet {
     int exp = 64 - Long.numberOfLeadingZeros(maxMemory) - 1; // round down to nearest power of 2
     int adjust = 0;
     // `- 16` below to map exponent to corresponding `long[]` size
-    WORDS_SHIFT = Math.min(17, Math.max(7, (exp - 16) + adjust)); // 1K <= MAX_BLOCK_SIZE <= 1M
+    String tmp = System.getProperty("lucene.fixedbitset.maxwordsshift");
+    int maxWordsShift;
+    if (tmp == null) {
+      maxWordsShift = DEFAULT_MAX_WORDS_SHIFT;
+    } else {
+      try {
+        maxWordsShift = Integer.parseInt(tmp);
+      } catch (Exception e) {
+        maxWordsShift = DEFAULT_MAX_WORDS_SHIFT;
+      }
+    }
+    WORDS_SHIFT = Math.min(maxWordsShift, Math.max(7, (exp - 16) + adjust)); // 1K <= MAX_BLOCK_SIZE <= 1M
     System.err.println("exp="+exp);
     System.err.println("MEM="+(maxMemory >> 20)+"m, maxBlockSize="+(1 << WORDS_SHIFT)+" ("+(((1 << WORDS_SHIFT) * 8) >> 10)+"k) WORDS_SHIFT="+WORDS_SHIFT+" / "+RamUsageEstimator.humanReadableUnits(RamUsageEstimator.sizeOf(new long[1 << WORDS_SHIFT])));
-  }
-
-  public static void main(String[] args) {
-
   }
 
   private static final int MAX_BLOCK_SIZE = 1 << WORDS_SHIFT;
