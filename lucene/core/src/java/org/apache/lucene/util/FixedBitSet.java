@@ -80,7 +80,7 @@ public final class FixedBitSet extends BitSet {
     System.err.println("MEM="+(maxMemory >> 20)+"m, maxBlockSize="+(1 << WORDS_SHIFT)+" ("+(((1 << WORDS_SHIFT) * 8) >> 10)+"k) WORDS_SHIFT="+WORDS_SHIFT+" / "+RamUsageEstimator.humanReadableUnits(RamUsageEstimator.sizeOf(new long[1 << WORDS_SHIFT])));
   }
 
-  private static final int MAX_BLOCK_SIZE = 1 << WORDS_SHIFT;
+  public static final int MAX_BLOCK_SIZE = 1 << WORDS_SHIFT;
   public static final int BLOCK_MASK = MAX_BLOCK_SIZE - 1;
 
   private final long[][] bits; // Array of longs holding the bits
@@ -248,7 +248,7 @@ public final class FixedBitSet extends BitSet {
   }
 
   public static final class BitsBuilder {
-    private final long[][] bits;
+    public final long[][] bits;
     public BitsBuilder(int numWords) {
       this.bits = new long[((numWords - 1) >> WORDS_SHIFT) + 1][];
       initBits(numWords, bits);
