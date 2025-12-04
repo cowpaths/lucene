@@ -47,7 +47,12 @@ public class TestFixedBitSet extends BaseBitSetTestCase<FixedBitSet> {
       set.set(i);
     }
     final int cardinality = set.cardinality();
-    assertEquals(cardinality, set.approximateCardinality(), cardinality / 20); // 5% error at most
+    if (FixedBitSet.WORDS_SHIFT >= 4) {
+      // if `WORDS_SHIFT < 4`, then partition size is smaller than the 16 element `rangeLength`
+      // that `approximateCardinality()` uses for sampling. Values this low would never be set
+      // other than in a test context, so we can just skip it.
+      assertEquals(cardinality, set.approximateCardinality(), cardinality / 20); // 5% error at most
+    }
   }
 
   void doGet(java.util.BitSet a, FixedBitSet b) {
@@ -395,8 +400,15 @@ public class TestFixedBitSet extends BaseBitSetTestCase<FixedBitSet> {
     assertTrue(newBits.get(1));
     assertTrue(newBits.get(4));
     newBits.clear(1);
-    // we grew the long[], so it's not shared
-    assertTrue(bits.get(1));
+    if (FixedBitSet.WORDS_SHIFT > 0) {
+      // we grew the long[], so it's not shared
+      assertTrue(bits.get(1));
+    } else {
+      // unusual case, where `-Plucene.fixedbitset.maxwordsshift=0` for stress test
+      // here, growing the 2-d array means _adding_ a new array, so the first bits
+      // actually remain shared.
+      assertFalse(bits.get(1));
+    }
     assertFalse(newBits.get(1));
   }
 
