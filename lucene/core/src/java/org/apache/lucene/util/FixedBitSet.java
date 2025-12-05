@@ -369,6 +369,24 @@ public final class FixedBitSet extends BitSet {
   }
 
   /**
+   * If the specified {@link Bits} instance is backed by an accessible {@code long[][]}, returns the
+   * array; otherwise returns null.
+   *
+   * <p>TODO: This should be temporary. The right way to handle this is to move the bit range copy
+   * code from Solr into Lucene, so that it can be invoked without accessing the underlying {@code
+   * long[]} (or {@code long[][]}).
+   */
+  public static long[][] getBits(Bits bits) {
+    if (bits instanceof FixedBitSet) {
+      return ((FixedBitSet) bits).getBits();
+    } else if (bits instanceof FixedBits) {
+      return ((FixedBits) bits).bits;
+    } else {
+      return null;
+    }
+  }
+
+  /**
    * Returns number of set bits. NOTE: this visits every long in the backing bits array, and the
    * result is not internally cached!
    */
