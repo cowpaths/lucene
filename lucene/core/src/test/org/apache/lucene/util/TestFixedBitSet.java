@@ -327,7 +327,7 @@ public class TestFixedBitSet extends BaseBitSetTestCase<FixedBitSet> {
     if (random().nextBoolean()) {
       int bits2words = FixedBitSet.bits2words(numBits);
       long[] words = new long[bits2words + random().nextInt(100)];
-      bs = new FixedBitSet(words, numBits);
+      bs = new FixedBitSet(FixedBitSet.DEFAULT_MODIFIER.copyOf(words), numBits);
     } else {
       bs = new FixedBitSet(numBits);
     }

@@ -17,6 +17,7 @@
 package org.apache.lucene.backward_codecs.lucene50;
 
 import java.io.IOException;
+import java.nio.LongBuffer;
 import java.util.Collection;
 import org.apache.lucene.backward_codecs.store.EndiannessReverserUtil;
 import org.apache.lucene.codecs.CodecUtil;
@@ -101,9 +102,10 @@ public final class Lucene50LiveDocsFormat extends LiveDocsFormat {
   }
 
   private FixedBitSet readFixedBitSet(IndexInput input, int length) throws IOException {
-    long[] data = new long[FixedBitSet.bits2words(length)];
-    for (int i = 0; i < data.length; i++) {
-      data[i] = input.readLong();
+    int lim = FixedBitSet.bits2words(length);
+    LongBuffer data = FixedBitSet.DEFAULT_MODIFIER.allocate(lim);
+    for (int i = 0; i < lim; i++) {
+      data.put(i, input.readLong());
     }
     return new FixedBitSet(data, length);
   }

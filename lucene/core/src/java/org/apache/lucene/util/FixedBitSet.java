@@ -16,10 +16,16 @@
  */
 package org.apache.lucene.util;
 
-import java.io.IOException;
-import java.util.Arrays;
+import jdk.incubator.vector.LongVector;
+import jdk.incubator.vector.VectorOperators;
+import jdk.incubator.vector.VectorSpecies;
 import org.apache.lucene.search.DocIdSet;
 import org.apache.lucene.search.DocIdSetIterator;
+import java.io.IOException;
+import java.lang.foreign.MemorySegment;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.LongBuffer;
 
 /**
  * BitSet of fixed length (numBits), backed by accessible ({@link #getBits}) long[], accessed with
@@ -33,10 +39,43 @@ public final class FixedBitSet extends BitSet {
   private static final long BASE_RAM_BYTES_USED =
       RamUsageEstimator.shallowSizeOfInstance(FixedBitSet.class);
 
-  private final long[] bits; // Array of longs holding the bits
+  private final Modifier m;
+  private final LongBuffer bits; // Array of longs holding the bits
+  private final MemorySegment memorySegment;
   private final int numBits; // The number of bits in use
   private final int numWords; // The exact number of longs needed to hold numBits (<= bits.length)
 
+  public interface Modifier {
+    LongBuffer allocate(int numWords);
+    LongBuffer grow(LongBuffer arr, int minSize);
+    LongBuffer copyOf(long[] words);
+  }
+
+  public static final Modifier DEFAULT_MODIFIER = new Modifier() {
+    @Override
+    public LongBuffer allocate(int numWords) {
+      return ByteBuffer.allocate(numWords << 3).asLongBuffer();
+    }
+
+    @Override
+    public LongBuffer grow(LongBuffer arr, int minSize) {
+      assert minSize >= 0 : "size must be positive (got " + minSize + "): likely integer overflow?";
+      if (arr.remaining() < minSize) {
+        LongBuffer ret = allocate(ArrayUtil.oversize(minSize, Long.BYTES));
+        ret.put(arr);
+        ret.clear();
+        arr.flip(); // restore
+        return ret.clear();
+      } else {
+        return arr;
+      }
+    }
+
+    @Override
+    public LongBuffer copyOf(long[] words) {
+      return allocate(words.length).put(0, words);
+    }
+  };
   /**
    * If the given {@link FixedBitSet} is large enough to hold {@code numBits+1}, returns the given
    * bits, otherwise returns a new {@link FixedBitSet} which can hold the requested number of bits.
@@ -46,17 +85,21 @@ public final class FixedBitSet extends BitSet {
    * greater than {@code numBits}.
    */
   public static FixedBitSet ensureCapacity(FixedBitSet bits, int numBits) {
+    return ensureCapacity(bits, numBits, DEFAULT_MODIFIER);
+  }
+
+  public static FixedBitSet ensureCapacity(FixedBitSet bits, int numBits, Modifier m) {
     if (numBits < bits.numBits) {
       return bits;
     } else {
       // Depends on the ghost bits being clear!
       // (Otherwise, they may become visible in the new instance)
       int numWords = bits2words(numBits);
-      long[] arr = bits.getBits();
-      if (numWords >= arr.length) {
-        arr = ArrayUtil.grow(arr, numWords + 1);
+      LongBuffer arr = bits.getBits();
+      if (numWords >= arr.remaining()) {
+        arr = m.grow(arr, numWords + 1);
       }
-      return new FixedBitSet(arr, arr.length << 6);
+      return new FixedBitSet(arr, arr.remaining() << 6, m);
     }
   }
 
@@ -67,6 +110,9 @@ public final class FixedBitSet extends BitSet {
     return ((numBits - 1) >> 6) + 1;
   }
 
+  private static final VectorSpecies<Long> S = LongVector.SPECIES_PREFERRED;
+  private static final int INC = S.length();
+
   /**
    * Returns the popcount or cardinality of the intersection of the two sets. Neither set is
    * modified.
@@ -75,8 +121,15 @@ public final class FixedBitSet extends BitSet {
     // Depends on the ghost bits being clear!
     long tot = 0;
     final int numCommonWords = Math.min(a.numWords, b.numWords);
-    for (int i = 0; i < numCommonWords; ++i) {
-      tot += Long.bitCount(a.bits[i] & b.bits[i]);
+    int i = 0;
+    for (int lim = S.loopBound(numCommonWords); i < lim; i += INC) {
+      long off = (long) i << 3;
+      LongVector vA = LongVector.fromMemorySegment(S, a.memorySegment, off, ByteOrder.BIG_ENDIAN);
+      LongVector vB = LongVector.fromMemorySegment(S, b.memorySegment, off, ByteOrder.BIG_ENDIAN);
+      tot += vA.and(vB).lanewise(VectorOperators.BIT_COUNT).reduceLanes(VectorOperators.ADD);
+    }
+    for (; i < numCommonWords; ++i) {
+      tot += Long.bitCount(a.bits.get(i) & b.bits.get(i));
     }
     return tot;
   }
@@ -86,14 +139,42 @@ public final class FixedBitSet extends BitSet {
     // Depends on the ghost bits being clear!
     long tot = 0;
     final int numCommonWords = Math.min(a.numWords, b.numWords);
-    for (int i = 0; i < numCommonWords; ++i) {
-      tot += Long.bitCount(a.bits[i] | b.bits[i]);
+    int i = 0;
+    for (int lim = S.loopBound(numCommonWords); i < lim; i += INC) {
+      long off = (long) i << 3;
+      LongVector vA = LongVector.fromMemorySegment(S, a.memorySegment, off, ByteOrder.BIG_ENDIAN);
+      LongVector vB = LongVector.fromMemorySegment(S, b.memorySegment, off, ByteOrder.BIG_ENDIAN);
+      tot += vA.or(vB).lanewise(VectorOperators.BIT_COUNT).reduceLanes(VectorOperators.ADD);
     }
-    for (int i = numCommonWords; i < a.numWords; ++i) {
-      tot += Long.bitCount(a.bits[i]);
+    int alignedLim;
+    if (i == numCommonWords) {
+      alignedLim = i;
+    } else {
+      alignedLim = i + INC;
+      do {
+        tot += Long.bitCount(a.bits.get(i) | b.bits.get(i));
+      } while (++i < numCommonWords);
+      for (int lim = Math.min(a.numWords, alignedLim); i < lim; ++i) {
+        tot += Long.bitCount(a.bits.get(i));
+      }
+      for (int j = numCommonWords, lim = Math.min(b.numWords, alignedLim); j < lim; ++j) {
+        tot += Long.bitCount(b.bits.get(j));
+      }
     }
-    for (int i = numCommonWords; i < b.numWords; ++i) {
-      tot += Long.bitCount(b.bits[i]);
+    for (int lim = S.loopBound(a.numWords); i < lim; i += INC) {
+      LongVector v = LongVector.fromMemorySegment(S, a.memorySegment, (long) i << 3, ByteOrder.BIG_ENDIAN);
+      tot += v.lanewise(VectorOperators.BIT_COUNT).reduceLanes(VectorOperators.ADD);
+    }
+    int j = alignedLim;
+    for (int lim = S.loopBound(b.numWords); j < lim; j += INC) {
+      LongVector v = LongVector.fromMemorySegment(S, b.memorySegment, (long) j << 3, ByteOrder.BIG_ENDIAN);
+      tot += v.lanewise(VectorOperators.BIT_COUNT).reduceLanes(VectorOperators.ADD);
+    }
+    for (; i < a.numWords; ++i) {
+      tot += Long.bitCount(a.bits.get(i));
+    }
+    for (; j < b.numWords; ++j) {
+      tot += Long.bitCount(b.bits.get(j));
     }
     return tot;
   }
@@ -106,11 +187,28 @@ public final class FixedBitSet extends BitSet {
     // Depends on the ghost bits being clear!
     long tot = 0;
     final int numCommonWords = Math.min(a.numWords, b.numWords);
-    for (int i = 0; i < numCommonWords; ++i) {
-      tot += Long.bitCount(a.bits[i] & ~b.bits[i]);
+    int i = 0;
+    for (int lim = S.loopBound(numCommonWords); i < lim; i += INC) {
+      long off = (long) i << 3;
+      LongVector vA = LongVector.fromMemorySegment(S, a.memorySegment, off, ByteOrder.BIG_ENDIAN);
+      LongVector vB = LongVector.fromMemorySegment(S, b.memorySegment, off, ByteOrder.BIG_ENDIAN);
+      tot += vA.lanewise(VectorOperators.AND_NOT, vB).lanewise(VectorOperators.BIT_COUNT).reduceLanes(VectorOperators.ADD);
     }
-    for (int i = numCommonWords; i < a.numWords; ++i) {
-      tot += Long.bitCount(a.bits[i]);
+    if (i < numCommonWords) {
+      int alignedLim = i + INC;
+      for (; i < numCommonWords; ++i) {
+        tot += Long.bitCount(a.bits.get(i) & ~b.bits.get(i));
+      }
+      for (int lim = Math.min(a.numWords, alignedLim); i < lim; ++i) {
+        tot += Long.bitCount(a.bits.get(i) & ~b.bits.get(i));
+      }
+    }
+    for (int lim = S.loopBound(a.numWords); i < lim; i += INC) {
+      LongVector v = LongVector.fromMemorySegment(S, a.memorySegment, (long) i << 3, ByteOrder.BIG_ENDIAN);
+      tot += v.lanewise(VectorOperators.BIT_COUNT).reduceLanes(VectorOperators.ADD);
+    }
+    for (; i < a.numWords; ++i) {
+      tot += Long.bitCount(a.bits.get(i));
     }
     return tot;
   }
@@ -122,9 +220,15 @@ public final class FixedBitSet extends BitSet {
    * @param numBits the number of bits needed
    */
   public FixedBitSet(int numBits) {
+    this(numBits, DEFAULT_MODIFIER);
+  }
+
+  public FixedBitSet(int numBits, Modifier m) {
+    this.m = m;
     this.numBits = numBits;
-    bits = new long[bits2words(numBits)];
-    numWords = bits.length;
+    bits = m.allocate(bits2words(numBits));
+    memorySegment = MemorySegment.ofBuffer(bits);
+    numWords = bits.remaining();
   }
 
   /**
@@ -135,21 +239,29 @@ public final class FixedBitSet extends BitSet {
    * @param storedBits the array to use as backing store
    * @param numBits the number of bits actually needed
    */
-  public FixedBitSet(long[] storedBits, int numBits) {
+  public FixedBitSet(LongBuffer storedBits, int numBits) {
+    this(storedBits, numBits, DEFAULT_MODIFIER);
+  }
+
+  public FixedBitSet(LongBuffer storedBits, int numBits, Modifier m) {
+    this.m = m;
     this.numWords = bits2words(numBits);
-    if (numWords > storedBits.length) {
+    if (numWords > storedBits.remaining()) {
       throw new IllegalArgumentException(
           "The given long array is too small  to hold " + numBits + " bits");
     }
     this.numBits = numBits;
     this.bits = storedBits;
+    this.memorySegment = MemorySegment.ofBuffer(bits);
 
     assert verifyGhostBitsClear();
   }
 
   @Override
   public void clear() {
-    Arrays.fill(bits, 0L);
+    for (int i = bits.remaining() - 1; i >= 0; i--) {
+      bits.put(i, 0L);
+    }
   }
 
   /**
@@ -159,15 +271,15 @@ public final class FixedBitSet extends BitSet {
    * @return true if the bits past numBits are clear.
    */
   private boolean verifyGhostBitsClear() {
-    for (int i = numWords; i < bits.length; i++) {
-      if (bits[i] != 0) return false;
+    for (int i = numWords, lim = bits.remaining(); i < lim; i++) {
+      if (bits.get(i) != 0) return false;
     }
 
     if ((numBits & 0x3f) == 0) return true;
 
     long mask = -1L << numBits;
 
-    return (bits[numWords - 1] & mask) == 0;
+    return (bits.get(numWords - 1) & mask) == 0;
   }
 
   @Override
@@ -177,11 +289,12 @@ public final class FixedBitSet extends BitSet {
 
   @Override
   public long ramBytesUsed() {
-    return BASE_RAM_BYTES_USED + RamUsageEstimator.sizeOf(bits);
+    // for now, pretend we're a long[]
+    return BASE_RAM_BYTES_USED + RamUsageEstimator.alignObjectSize((long) RamUsageEstimator.NUM_BYTES_ARRAY_HEADER + (long) Long.BYTES * bits.remaining());
   }
 
   /** Expert. */
-  public long[] getBits() {
+  public LongBuffer getBits() {
     return bits;
   }
 
@@ -193,8 +306,13 @@ public final class FixedBitSet extends BitSet {
   public int cardinality() {
     // Depends on the ghost bits being clear!
     long tot = 0;
-    for (int i = 0; i < numWords; ++i) {
-      tot += Long.bitCount(bits[i]);
+    int i = 0;
+    for (int lim = S.loopBound(numWords); i < lim; i += INC) {
+      LongVector v = LongVector.fromMemorySegment(S, memorySegment, (long) i << 3, ByteOrder.BIG_ENDIAN);
+      tot += v.lanewise(VectorOperators.BIT_COUNT).reduceLanes(VectorOperators.ADD);
+    }
+    for (; i < numWords; ++i) {
+      tot += Long.bitCount(bits.get(i));
     }
     return Math.toIntExact(tot);
   }
@@ -216,8 +334,13 @@ public final class FixedBitSet extends BitSet {
     long popCount = 0;
     int maxWord;
     for (maxWord = 0; maxWord + interval < numWords; maxWord += interval) {
-      for (int i = 0; i < rangeLength; ++i) {
-        popCount += Long.bitCount(bits[maxWord + i]);
+      int i = 0;
+      for (int lim = S.loopBound(rangeLength); i < lim; i += INC) {
+        LongVector v = LongVector.fromMemorySegment(S, memorySegment, (long) (maxWord + i) << 3, ByteOrder.BIG_ENDIAN);
+        popCount += v.lanewise(VectorOperators.BIT_COUNT).reduceLanes(VectorOperators.ADD);
+      }
+      for (; i < rangeLength; ++i) {
+        popCount += Long.bitCount(bits.get(maxWord + i));
       }
     }
 
@@ -232,7 +355,7 @@ public final class FixedBitSet extends BitSet {
     // signed shift will keep a negative index and force an
     // array-index-out-of-bounds-exception, removing the need for an explicit check.
     long bitmask = 1L << index;
-    return (bits[i] & bitmask) != 0;
+    return (bits.get(i) & bitmask) != 0;
   }
 
   @Override
@@ -240,7 +363,7 @@ public final class FixedBitSet extends BitSet {
     assert index >= 0 && index < numBits : "index=" + index + ", numBits=" + numBits;
     int wordNum = index >> 6; // div 64
     long bitmask = 1L << index;
-    bits[wordNum] |= bitmask;
+    bits.put(wordNum, bits.get(wordNum) | bitmask);
   }
 
   @Override
@@ -248,9 +371,9 @@ public final class FixedBitSet extends BitSet {
     assert index >= 0 && index < numBits : "index=" + index + ", numBits=" + numBits;
     int wordNum = index >> 6; // div 64
     long bitmask = 1L << index;
-    boolean val = (bits[wordNum] & bitmask) != 0;
-    bits[wordNum] |= bitmask;
-    return val;
+    long extantWord = bits.get(wordNum);
+    bits.put(wordNum, extantWord | bitmask);
+    return (extantWord & bitmask) != 0;
   }
 
   @Override
@@ -258,16 +381,16 @@ public final class FixedBitSet extends BitSet {
     assert index >= 0 && index < numBits : "index=" + index + ", numBits=" + numBits;
     int wordNum = index >> 6;
     long bitmask = 1L << index;
-    bits[wordNum] &= ~bitmask;
+    bits.put(wordNum, bits.get(wordNum) & ~bitmask);
   }
 
   public boolean getAndClear(int index) {
     assert index >= 0 && index < numBits : "index=" + index + ", numBits=" + numBits;
     int wordNum = index >> 6; // div 64
     long bitmask = 1L << index;
-    boolean val = (bits[wordNum] & bitmask) != 0;
-    bits[wordNum] &= ~bitmask;
-    return val;
+    long extantWord = bits.get(wordNum);
+    bits.put(wordNum, extantWord & ~bitmask);
+    return (extantWord & bitmask) != 0;
   }
 
   @Override
@@ -275,14 +398,14 @@ public final class FixedBitSet extends BitSet {
     // Depends on the ghost bits being clear!
     assert index >= 0 && index < numBits : "index=" + index + ", numBits=" + numBits;
     int i = index >> 6;
-    long word = bits[i] >> index; // skip all the bits to the right of index
+    long word = bits.get(i) >> index; // skip all the bits to the right of index
 
     if (word != 0) {
       return index + Long.numberOfTrailingZeros(word);
     }
 
     while (++i < numWords) {
-      word = bits[i];
+      word = bits.get(i);
       if (word != 0) {
         return (i << 6) + Long.numberOfTrailingZeros(word);
       }
@@ -296,14 +419,14 @@ public final class FixedBitSet extends BitSet {
     assert index >= 0 && index < numBits : "index=" + index + " numBits=" + numBits;
     int i = index >> 6;
     final int subIndex = index & 0x3f; // index within the word
-    long word = (bits[i] << (63 - subIndex)); // skip all the bits to the left of index
+    long word = (bits.get(i) << (63 - subIndex)); // skip all the bits to the left of index
 
     if (word != 0) {
       return (i << 6) + subIndex - Long.numberOfLeadingZeros(word); // See LUCENE-3197
     }
 
     while (--i >= 0) {
-      word = bits[i];
+      word = bits.get(i);
       if (word != 0) {
         return (i << 6) + 63 - Long.numberOfLeadingZeros(word);
       }
@@ -336,13 +459,14 @@ public final class FixedBitSet extends BitSet {
     or(otherOffsetWords, other.bits, other.numWords);
   }
 
-  private void or(final int otherOffsetWords, final long[] otherArr, final int otherNumWords) {
+  private void or(final int otherOffsetWords, final LongBuffer otherArr, final int otherNumWords) {
     assert otherNumWords + otherOffsetWords <= numWords
         : "numWords=" + numWords + ", otherNumWords=" + otherNumWords;
     int pos = Math.min(numWords - otherOffsetWords, otherNumWords);
-    final long[] thisArr = this.bits;
+    final LongBuffer thisArr = this.bits;
     while (--pos >= 0) {
-      thisArr[pos + otherOffsetWords] |= otherArr[pos];
+      int off = pos + otherOffsetWords;
+      thisArr.put(off, thisArr.get(off) | otherArr.get(pos));
     }
   }
 
@@ -365,12 +489,12 @@ public final class FixedBitSet extends BitSet {
     }
   }
 
-  private void xor(long[] otherBits, int otherNumWords) {
+  private void xor(LongBuffer otherBits, int otherNumWords) {
     assert otherNumWords <= numWords : "numWords=" + numWords + ", other.numWords=" + otherNumWords;
-    final long[] thisBits = this.bits;
+    final LongBuffer thisBits = this.bits;
     int pos = Math.min(numWords, otherNumWords);
     while (--pos >= 0) {
-      thisBits[pos] ^= otherBits[pos];
+      thisBits.put(pos, thisBits.get(pos) ^ otherBits.get(pos));
     }
   }
 
@@ -379,7 +503,7 @@ public final class FixedBitSet extends BitSet {
     // Depends on the ghost bits being clear!
     int pos = Math.min(numWords, other.numWords);
     while (--pos >= 0) {
-      if ((bits[pos] & other.bits[pos]) != 0) return true;
+      if ((bits.get(pos) & other.bits.get(pos)) != 0) return true;
     }
     return false;
   }
@@ -389,14 +513,14 @@ public final class FixedBitSet extends BitSet {
     and(other.bits, other.numWords);
   }
 
-  private void and(final long[] otherArr, final int otherNumWords) {
-    final long[] thisArr = this.bits;
+  private void and(final LongBuffer otherArr, final int otherNumWords) {
+    final LongBuffer thisArr = this.bits;
     int pos = Math.min(this.numWords, otherNumWords);
     while (--pos >= 0) {
-      thisArr[pos] &= otherArr[pos];
+      thisArr.put(pos, thisArr.get(pos) & otherArr.get(pos));
     }
     if (this.numWords > otherNumWords) {
-      Arrays.fill(thisArr, otherNumWords, this.numWords, 0L);
+      fill(thisArr, otherNumWords, this.numWords, 0L);
     }
   }
 
@@ -427,11 +551,12 @@ public final class FixedBitSet extends BitSet {
     andNot(otherOffsetWords, other.bits, other.numWords);
   }
 
-  private void andNot(final int otherOffsetWords, final long[] otherArr, final int otherNumWords) {
+  private void andNot(final int otherOffsetWords, final LongBuffer otherArr, final int otherNumWords) {
     int pos = Math.min(numWords - otherOffsetWords, otherNumWords);
-    final long[] thisArr = this.bits;
+    final LongBuffer thisArr = this.bits;
     while (--pos >= 0) {
-      thisArr[pos + otherOffsetWords] &= ~otherArr[pos];
+      int off = pos + otherOffsetWords;
+      thisArr.put(off, thisArr.get(off) & ~otherArr.get(pos));
     }
   }
 
@@ -449,7 +574,7 @@ public final class FixedBitSet extends BitSet {
     final int count = numWords;
 
     for (int i = 0; i < count; i++) {
-      if (bits[i] != 0) return false;
+      if (bits.get(i) != 0) return false;
     }
 
     return true;
@@ -482,17 +607,17 @@ public final class FixedBitSet extends BitSet {
     long endmask = -1L >>> -endIndex;
 
     if (startWord == endWord) {
-      bits[startWord] ^= (startmask & endmask);
+      bits.put(startWord, bits.get(startWord) ^ (startmask & endmask));
       return;
     }
 
-    bits[startWord] ^= startmask;
+    bits.put(startWord, bits.get(startWord) ^ startmask);
 
     for (int i = startWord + 1; i < endWord; i++) {
-      bits[i] = ~bits[i];
+      bits.put(i, ~bits.get(i));
     }
 
-    bits[endWord] ^= endmask;
+    bits.put(endWord, bits.get(endWord) ^ endmask);
   }
 
   /** Flip the bit at the provided index. */
@@ -500,7 +625,7 @@ public final class FixedBitSet extends BitSet {
     assert index >= 0 && index < numBits : "index=" + index + " numBits=" + numBits;
     int wordNum = index >> 6; // div 64
     long bitmask = 1L << index; // mod 64 is implicit
-    bits[wordNum] ^= bitmask;
+    bits.put(wordNum, bits.get(wordNum) ^ bitmask);
   }
 
   /**
@@ -524,13 +649,18 @@ public final class FixedBitSet extends BitSet {
     long endmask = -1L >>> -endIndex;
 
     if (startWord == endWord) {
-      bits[startWord] |= (startmask & endmask);
+      bits.put(startWord, bits.get(startWord) | (startmask & endmask));
       return;
     }
 
-    bits[startWord] |= startmask;
-    Arrays.fill(bits, startWord + 1, endWord, -1L);
-    bits[endWord] |= endmask;
+    bits.put(startWord, bits.get(startWord) | startmask);
+    fill(bits, startWord + 1, endWord, -1L);
+    bits.put(endWord, bits.get(endWord) | endmask);
+  }
+
+  private static void fill(LongBuffer bits, int startWord, int endWord, long val) {
+    for (int i = startWord; i < endWord; i++)
+      bits.put(i, val);
   }
 
   @Override
@@ -553,20 +683,23 @@ public final class FixedBitSet extends BitSet {
     endmask = ~endmask;
 
     if (startWord == endWord) {
-      bits[startWord] &= (startmask | endmask);
+      bits.put(startWord, bits.get(startWord) & (startmask | endmask));
       return;
     }
 
-    bits[startWord] &= startmask;
-    Arrays.fill(bits, startWord + 1, endWord, 0L);
-    bits[endWord] &= endmask;
+    bits.put(startWord, bits.get(startWord) & startmask);
+    fill(bits, startWord + 1, endWord, 0L);
+    bits.put(endWord, bits.get(endWord) & endmask);
   }
 
   @Override
   public FixedBitSet clone() {
-    long[] bits = new long[this.bits.length];
-    System.arraycopy(this.bits, 0, bits, 0, numWords);
-    return new FixedBitSet(bits, numBits);
+    LongBuffer bits = m.allocate(this.bits.capacity());
+    this.bits.limit(numWords);
+    bits.put(this.bits);
+    bits.clear();
+    this.bits.flip();
+    return new FixedBitSet(bits, numBits, m);
   }
 
   @Override
@@ -582,7 +715,7 @@ public final class FixedBitSet extends BitSet {
       return false;
     }
     // Depends on the ghost bits being clear!
-    return Arrays.equals(bits, other.bits);
+    return bits.equals(other.bits);
   }
 
   @Override
@@ -590,7 +723,7 @@ public final class FixedBitSet extends BitSet {
     // Depends on the ghost bits being clear!
     long h = 0;
     for (int i = numWords; --i >= 0; ) {
-      h ^= bits[i];
+      h ^= bits.get(i);
       h = (h << 1) | (h >>> 63); // rotate left
     }
     // fold leftmost bits into right and add a constant to prevent
@@ -600,17 +733,21 @@ public final class FixedBitSet extends BitSet {
 
   /** Make a copy of the given bits. */
   public static FixedBitSet copyOf(Bits bits) {
+    return copyOf(bits, DEFAULT_MODIFIER);
+  }
+
+  public static FixedBitSet copyOf(Bits bits, Modifier m) {
     if (bits instanceof FixedBits) {
       // restore the original FixedBitSet
       FixedBits fixedBits = (FixedBits) bits;
-      bits = new FixedBitSet(fixedBits.bits, fixedBits.length);
+      bits = new FixedBitSet(fixedBits.bits, fixedBits.length, m);
     }
 
     if (bits instanceof FixedBitSet) {
       return ((FixedBitSet) bits).clone();
     } else {
       int length = bits.length();
-      FixedBitSet bitSet = new FixedBitSet(length);
+      FixedBitSet bitSet = new FixedBitSet(length, m);
       bitSet.set(0, length);
       for (int i = 0; i < length; ++i) {
         if (bits.get(i) == false) {
@@ -618,6 +755,41 @@ public final class FixedBitSet extends BitSet {
         }
       }
       return bitSet;
+    }
+  }
+
+  public static void copyTo(Bits bits, FixedBitSet[] dest, Modifier m) {
+    LongBuffer buf;
+    int len;
+    if (bits instanceof FixedBits) {
+      // restore the original FixedBitSet
+      FixedBits fixedBits = (FixedBits) bits;
+      buf = fixedBits.bits.slice();
+      len = fixedBits.length;
+    } else if (bits instanceof FixedBitSet) {
+      FixedBitSet fbs = (FixedBitSet) bits;
+      buf = fbs.bits.slice();
+      len = fbs.length();
+    } else {
+      len = bits.length();
+      int i = 0;
+      for (FixedBitSet subDest : dest) {
+        int subLen = subDest.length();
+        subDest.set(0, subLen);
+        int base = i;
+        for (int lim = Math.min(i + subLen, len); i < lim; i++) {
+          if (!bits.get(i)) {
+            subDest.clear(i - base);
+          }
+        }
+      }
+      return;
+    }
+    int srcLim = bits2words(len);
+    for (FixedBitSet fixedBitSet : dest) {
+      LongBuffer subDest = fixedBitSet.bits;
+      buf.limit(Math.min(buf.position() + subDest.remaining(), srcLim));
+      subDest.put(buf).flip();
     }
   }
 

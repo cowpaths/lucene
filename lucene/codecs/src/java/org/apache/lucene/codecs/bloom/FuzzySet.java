@@ -17,6 +17,7 @@
 package org.apache.lucene.codecs.bloom;
 
 import java.io.IOException;
+import java.nio.LongBuffer;
 import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.store.DataInput;
 import org.apache.lucene.store.DataOutput;
@@ -182,12 +183,13 @@ public class FuzzySet implements Accountable {
   public void serialize(DataOutput out) throws IOException {
     out.writeVInt(hashCount);
     out.writeInt(bloomSize);
-    long[] bits = filter.getBits();
-    out.writeInt(bits.length);
-    for (int i = 0; i < bits.length; i++) {
+    LongBuffer bits = filter.getBits();
+    int lim = bits.remaining();
+    out.writeInt(lim);
+    for (int i = 0; i < lim; i++) {
       // Can't used VLong encoding because cant cope with negative numbers
       // output by FixedBitSet
-      out.writeLong(bits[i]);
+      out.writeLong(bits.get(i));
     }
   }
 
@@ -195,9 +197,9 @@ public class FuzzySet implements Accountable {
     int hashCount = in.readVInt();
     int bloomSize = in.readInt();
     int numLongs = in.readInt();
-    long[] longs = new long[numLongs];
+    LongBuffer longs = FixedBitSet.DEFAULT_MODIFIER.allocate(numLongs);
     for (int i = 0; i < numLongs; i++) {
-      longs[i] = in.readLong();
+      longs.put(i, in.readLong());
     }
     FixedBitSet bits = new FixedBitSet(longs, bloomSize + 1);
     return new FuzzySet(bits, bloomSize, hashCount);

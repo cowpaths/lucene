@@ -18,6 +18,7 @@ package org.apache.lucene.codecs.lucene90;
 
 import java.io.DataInput;
 import java.io.IOException;
+import java.nio.LongBuffer;
 import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.store.IndexOutput;
@@ -120,8 +121,9 @@ public final class IndexedDISI extends DocIdSetIterator {
           final byte[] rank = createRank(buffer, denseRankPower);
           out.writeBytes(rank, rank.length);
         }
-        for (long word : buffer.getBits()) {
-          out.writeLong(word);
+        LongBuffer bits = buffer.getBits();
+        for (int i = bits.position(), lim = bits.limit(); i < lim; i++) {
+          out.writeLong(bits.get(i));
         }
       }
     } else {
@@ -140,14 +142,14 @@ public final class IndexedDISI extends DocIdSetIterator {
     final int rankMark = longsPerRank - 1;
     final int rankIndexShift = denseRankPower - 7; // 6 for the long (2^6) + 1 for 2 bytes/entry
     final byte[] rank = new byte[DENSE_BLOCK_LONGS >> rankIndexShift];
-    final long[] bits = buffer.getBits();
+    final LongBuffer bits = buffer.getBits();
     int bitCount = 0;
     for (int word = 0; word < DENSE_BLOCK_LONGS; word++) {
       if ((word & rankMark) == 0) { // Every longsPerRank longs
         rank[word >> rankIndexShift] = (byte) (bitCount >> 8);
         rank[(word >> rankIndexShift) + 1] = (byte) (bitCount & 0xFF);
       }
-      bitCount += Long.bitCount(bits[word]);
+      bitCount += Long.bitCount(bits.get(word));
     }
     return rank;
   }

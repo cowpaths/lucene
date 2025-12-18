@@ -119,6 +119,6 @@ public class TestReqExclBulkScorer extends LuceneTestCase {
     excludedSet.or(excl.iterator());
     expectedMatches.andNot(excludedSet);
 
-    assertArrayEquals(expectedMatches.getBits(), actualMatches.getBits());
+    assertEquals(expectedMatches.getBits(), actualMatches.getBits());
   }
 }

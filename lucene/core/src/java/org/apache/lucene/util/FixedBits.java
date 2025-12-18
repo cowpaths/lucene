@@ -16,13 +16,15 @@
  */
 package org.apache.lucene.util;
 
+import java.nio.LongBuffer;
+
 /** Immutable twin of FixedBitSet. */
 final class FixedBits implements Bits {
 
-  final long[] bits;
+  final LongBuffer bits;
   final int length;
 
-  FixedBits(long[] bits, int length) {
+  FixedBits(LongBuffer bits, int length) {
     this.bits = bits;
     this.length = length;
   }
@@ -34,7 +36,7 @@ final class FixedBits implements Bits {
     // signed shift will keep a negative index and force an
     // array-index-out-of-bounds-exception, removing the need for an explicit check.
     long bitmask = 1L << index;
-    return (bits[i] & bitmask) != 0;
+    return (bits.get(i) & bitmask) != 0;
   }
 
   @Override

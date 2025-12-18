@@ -17,6 +17,7 @@
 package org.apache.lucene.util.bkd;
 
 import java.io.IOException;
+import java.nio.LongBuffer;
 import org.apache.lucene.index.PointValues.IntersectVisitor;
 import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.store.DataOutput;
@@ -210,7 +211,7 @@ final class DocIdsWriter {
     int longLen = in.readVInt();
     long[] bits = new long[longLen];
     in.readLongs(bits, 0, longLen);
-    FixedBitSet bitSet = new FixedBitSet(bits, longLen << 6);
+    FixedBitSet bitSet = new FixedBitSet(LongBuffer.wrap(bits), longLen << 6);
     return new DocBaseBitSetIterator(bitSet, count, offsetWords << 6);
   }
 

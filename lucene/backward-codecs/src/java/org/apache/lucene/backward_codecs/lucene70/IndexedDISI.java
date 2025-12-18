@@ -18,6 +18,8 @@ package org.apache.lucene.backward_codecs.lucene70;
 
 import java.io.DataInput;
 import java.io.IOException;
+import java.nio.LongBuffer;
+
 import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.store.IndexInput;
 import org.apache.lucene.store.IndexOutput;
@@ -62,8 +64,9 @@ final class IndexedDISI extends DocIdSetIterator {
     out.writeShort((short) (cardinality - 1));
     if (cardinality > MAX_ARRAY_LENGTH) {
       if (cardinality != 65536) { // all docs are set
-        for (long word : buffer.getBits()) {
-          out.writeLong(word);
+        LongBuffer bits = buffer.getBits();
+        for (int i = bits.position(), lim = bits.limit(); i < lim; i++) {
+          out.writeLong(bits.get(i));
         }
       }
     } else {

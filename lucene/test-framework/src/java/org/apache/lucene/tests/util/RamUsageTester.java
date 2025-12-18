@@ -18,11 +18,13 @@ package org.apache.lucene.tests.util;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.lang.foreign.MemorySegment;
 import java.lang.reflect.Array;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.LongBuffer;
 import java.nio.charset.CharsetDecoder;
 import java.nio.charset.CharsetEncoder;
 import java.nio.file.Path;
@@ -46,6 +48,7 @@ import java.util.function.ToLongFunction;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
+import org.apache.lucene.util.FixedBitSet;
 import org.apache.lucene.util.RamUsageEstimator;
 import org.apache.lucene.util.SuppressForbidden;
 
@@ -165,6 +168,7 @@ public final class RamUsageTester {
             (clazz instanceof CharsetEncoder)
                 || (clazz instanceof CharsetDecoder)
                 || (clazz instanceof ReentrantReadWriteLock)
+                || (clazz instanceof MemorySegment)
                 || (clazz instanceof AtomicReference<?>);
     if (isIgnorable.test(ob)) {
       return accumulator.accumulateObject(ob, 0, Collections.emptyMap(), stack);
@@ -188,9 +192,14 @@ public final class RamUsageTester {
             ob, alignedShallowInstanceSize + func.applyAsLong(ob), Collections.emptyMap(), stack);
       } else if (ob instanceof Enum) {
         return alignedShallowInstanceSize;
+      } else if (ob instanceof FixedBitSet.Modifier) {
+        return 0;
       } else if (ob instanceof ByteBuffer) {
         // Approximate ByteBuffers with their underlying storage (ignores field overhead).
         return byteArraySize(((ByteBuffer) ob).capacity());
+      } else if (ob instanceof LongBuffer) {
+        // Approximate LongBuffers with their underlying storage (ignores field overhead).
+        return longArraySize(((LongBuffer) ob).capacity());
       } else if (isJavaModule.test(obClazz) && ob instanceof Map) {
         final List<Object> values =
             ((Map<?, ?>) ob)
@@ -367,5 +376,9 @@ public final class RamUsageTester {
 
   private static long byteArraySize(int len) {
     return RamUsageEstimator.alignObjectSize((long) RamUsageEstimator.NUM_BYTES_ARRAY_HEADER + len);
+  }
+
+  private static long longArraySize(int len) {
+    return RamUsageEstimator.alignObjectSize((long) RamUsageEstimator.NUM_BYTES_ARRAY_HEADER + ((long) len << 3));
   }
 }

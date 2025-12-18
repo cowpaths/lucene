@@ -19,6 +19,7 @@ package org.apache.lucene.util;
 import java.lang.reflect.Array;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
+import java.nio.LongBuffer;
 import java.security.AccessControlException;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
@@ -206,6 +207,11 @@ public final class RamUsageEstimator {
   /** Returns the size in bytes of the long[] object. */
   public static long sizeOf(long[] arr) {
     return alignObjectSize((long) NUM_BYTES_ARRAY_HEADER + (long) Long.BYTES * arr.length);
+  }
+
+  /** Returns the size in bytes of the {@link LongBuffer} object, approximating it as a long[]. */
+  public static long sizeOf(LongBuffer arr) {
+    return alignObjectSize((long) NUM_BYTES_ARRAY_HEADER + (long) Long.BYTES * arr.remaining());
   }
 
   /** Returns the size in bytes of the double[] object. */
