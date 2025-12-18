@@ -47,12 +47,7 @@ public class TestFixedBitSet extends BaseBitSetTestCase<FixedBitSet> {
       set.set(i);
     }
     final int cardinality = set.cardinality();
-    if (FixedBitSet.WORDS_SHIFT >= 4) {
-      // if `WORDS_SHIFT < 4`, then partition size is smaller than the 16 element `rangeLength`
-      // that `approximateCardinality()` uses for sampling. Values this low would never be set
-      // other than in a test context, so we can just skip it.
-      assertEquals(cardinality, set.approximateCardinality(), cardinality / 20); // 5% error at most
-    }
+    assertEquals(cardinality, set.approximateCardinality(), cardinality / 20); // 5% error at most
   }
 
   void doGet(java.util.BitSet a, FixedBitSet b) {
@@ -331,7 +326,7 @@ public class TestFixedBitSet extends BaseBitSetTestCase<FixedBitSet> {
     FixedBitSet bs;
     if (random().nextBoolean()) {
       int bits2words = FixedBitSet.bits2words(numBits);
-      FixedBitSet.BitsBuilder words = new FixedBitSet.BitsBuilder(bits2words + random().nextInt(100));
+      long[] words = new long[bits2words + random().nextInt(100)];
       bs = new FixedBitSet(words, numBits);
     } else {
       bs = new FixedBitSet(numBits);
@@ -388,7 +383,8 @@ public class TestFixedBitSet extends BaseBitSetTestCase<FixedBitSet> {
     assertTrue(newBits.get(1));
     assertTrue(newBits.get(4));
     newBits.clear(1);
-    assertFalse(bits.get(1)); // single word; shared, since no need to re-allocate
+    // we align to 64-bits, so even though it shouldn't have, it re-allocated a long[1]
+    assertTrue(bits.get(1));
     assertFalse(newBits.get(1));
 
     newBits.set(1);
@@ -400,15 +396,8 @@ public class TestFixedBitSet extends BaseBitSetTestCase<FixedBitSet> {
     assertTrue(newBits.get(1));
     assertTrue(newBits.get(4));
     newBits.clear(1);
-    if (FixedBitSet.WORDS_SHIFT > 0) {
-      // we grew the long[], so it's not shared
-      assertTrue(bits.get(1));
-    } else {
-      // unusual case, where `-Plucene.fixedbitset.maxwordsshift=0` for stress test
-      // here, growing the 2-d array means _adding_ a new array, so the first bits
-      // actually remain shared.
-      assertFalse(bits.get(1));
-    }
+    // we grew the long[], so it's not shared
+    assertTrue(bits.get(1));
     assertFalse(newBits.get(1));
   }
 

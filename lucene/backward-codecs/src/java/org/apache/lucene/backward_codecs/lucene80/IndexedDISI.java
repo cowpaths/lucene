@@ -119,7 +119,9 @@ final class IndexedDISI extends DocIdSetIterator {
           final byte[] rank = createRank(buffer, denseRankPower);
           out.writeBytes(rank, rank.length);
         }
-        buffer.writeTo(out, false);
+        for (long word : buffer.getBits()) {
+          out.writeLong(word);
+        }
       }
     } else {
       BitSetIterator it = new BitSetIterator(buffer, cardinality);
@@ -137,14 +139,14 @@ final class IndexedDISI extends DocIdSetIterator {
     final int rankMark = longsPerRank - 1;
     final int rankIndexShift = denseRankPower - 7; // 6 for the long (2^6) + 1 for 2 bytes/entry
     final byte[] rank = new byte[DENSE_BLOCK_LONGS >> rankIndexShift];
-    final long[][] bits = buffer.getBits();
+    final long[] bits = buffer.getBits();
     int bitCount = 0;
     for (int word = 0; word < DENSE_BLOCK_LONGS; word++) {
       if ((word & rankMark) == 0) { // Every longsPerRank longs
         rank[word >> rankIndexShift] = (byte) (bitCount >> 8);
         rank[(word >> rankIndexShift) + 1] = (byte) (bitCount & 0xFF);
       }
-      bitCount += Long.bitCount(bits[word >> FixedBitSet.WORDS_SHIFT][word & FixedBitSet.BLOCK_MASK]);
+      bitCount += Long.bitCount(bits[word]);
     }
     return rank;
   }
