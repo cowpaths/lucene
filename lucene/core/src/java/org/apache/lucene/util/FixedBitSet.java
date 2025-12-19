@@ -25,6 +25,7 @@ import java.io.IOException;
 import java.lang.foreign.MemorySegment;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.nio.IntBuffer;
 import java.nio.LongBuffer;
 
 /**
@@ -49,12 +50,18 @@ public final class FixedBitSet extends BitSet {
     LongBuffer allocate(int numWords);
     LongBuffer grow(LongBuffer arr, int minSize);
     LongBuffer copyOf(long[] words);
+    IntBuffer allocateInt(int size);
   }
 
   public static final Modifier DEFAULT_MODIFIER = new Modifier() {
     @Override
     public LongBuffer allocate(int numWords) {
       return ByteBuffer.allocate(numWords << 3).asLongBuffer();
+    }
+
+    @Override
+    public IntBuffer allocateInt(int size) {
+      return ByteBuffer.allocate(size << 2).asIntBuffer();
     }
 
     @Override
