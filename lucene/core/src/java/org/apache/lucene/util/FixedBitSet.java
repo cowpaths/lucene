@@ -50,22 +50,9 @@ public final class FixedBitSet extends BitSet {
       return allocate(numWords, null);
     }
     default LongBuffer grow(LongBuffer arr, int minSize) {
-      return grow(arr, minSize, null);
-    }
-    default LongBuffer copyOf(long[] words) {
-      return copyOf(words, null);
-    }
-    default IntBuffer allocateInt(int size) {
-      return allocateInt(size, null);
-    }
-    ByteBuffer allocateBytes(int size, Object sentinel);
-    default LongBuffer allocate(int numWords, Object sentinel) {
-      return allocateBytes(numWords << 3, sentinel).asLongBuffer();
-    }
-    default LongBuffer grow(LongBuffer arr, int minSize, Object sentinel) {
       assert minSize >= 0 : "size must be positive (got " + minSize + "): likely integer overflow?";
       if (arr.remaining() < minSize) {
-        LongBuffer ret = allocate(ArrayUtil.oversize(minSize, Long.BYTES), sentinel);
+        LongBuffer ret = allocate(ArrayUtil.oversize(minSize, Long.BYTES));
         ret.put(arr);
         ret.clear();
         arr.flip(); // restore
@@ -74,8 +61,9 @@ public final class FixedBitSet extends BitSet {
         return arr;
       }
     }
-    default LongBuffer copyOf(long[] words, Object sentinel) {
-      return allocate(words.length, sentinel).put(0, words);
+    ByteBuffer allocateBytes(int size, Object sentinel);
+    default LongBuffer allocate(int numWords, Object sentinel) {
+      return allocateBytes(numWords << 3, sentinel).asLongBuffer();
     }
     default IntBuffer allocateInt(int size, Object sentinel) {
       return allocateBytes(size << 2, sentinel).asIntBuffer();
@@ -93,10 +81,6 @@ public final class FixedBitSet extends BitSet {
    * greater than {@code numBits}.
    */
   public static FixedBitSet ensureCapacity(FixedBitSet bits, int numBits) {
-    return ensureCapacity(bits, numBits, DEFAULT_MODIFIER, null);
-  }
-
-  public static FixedBitSet ensureCapacity(FixedBitSet bits, int numBits, Modifier m, Object sentinel) {
     if (numBits < bits.numBits) {
       return bits;
     } else {
@@ -105,7 +89,7 @@ public final class FixedBitSet extends BitSet {
       int numWords = bits2words(numBits);
       LongBuffer arr = bits.getBits();
       if (numWords >= arr.remaining()) {
-        arr = m.grow(arr, numWords + 1, sentinel);
+        arr = DEFAULT_MODIFIER.grow(arr, numWords + 1);
       }
       return new FixedBitSet(arr, arr.remaining() << 6);
     }
