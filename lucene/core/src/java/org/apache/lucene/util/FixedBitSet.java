@@ -21,6 +21,7 @@ import jdk.incubator.vector.VectorOperators;
 import jdk.incubator.vector.VectorSpecies;
 import org.apache.lucene.search.DocIdSet;
 import org.apache.lucene.search.DocIdSetIterator;
+import java.io.Closeable;
 import java.io.IOException;
 import java.lang.foreign.MemorySegment;
 import java.nio.ByteBuffer;
@@ -45,9 +46,9 @@ public final class FixedBitSet extends BitSet {
   private final int numBits; // The number of bits in use
   private final int numWords; // The exact number of longs needed to hold numBits (<= bits.length)
 
-  public interface Modifier {
+  public interface Modifier extends Closeable {
     default LongBuffer allocate(int numWords) {
-      return allocate(numWords, null);
+      return allocateBytes(numWords << 3).asLongBuffer();
     }
     default LongBuffer grow(LongBuffer arr, int minSize) {
       assert minSize >= 0 : "size must be positive (got " + minSize + "): likely integer overflow?";
@@ -61,16 +62,20 @@ public final class FixedBitSet extends BitSet {
         return arr;
       }
     }
-    ByteBuffer allocateBytes(int size, Object sentinel);
-    default LongBuffer allocate(int numWords, Object sentinel) {
-      return allocateBytes(numWords << 3, sentinel).asLongBuffer();
+    ByteBuffer allocateBytes(int size);
+    default IntBuffer allocateInt(int size) {
+      return allocateBytes(size << 2).asIntBuffer();
     }
-    default IntBuffer allocateInt(int size, Object sentinel) {
-      return allocateBytes(size << 2, sentinel).asIntBuffer();
+    default Modifier getBatchModifier(Object sentinel, int batchSize) {
+      return this;
+    }
+    @Override
+    default void close() {
+      // no-op
     }
   }
 
-  public static final Modifier DEFAULT_MODIFIER = (size, sentinel) -> ByteBuffer.allocate(size);
+  public static final Modifier DEFAULT_MODIFIER = ByteBuffer::allocate;
 
   /**
    * If the given {@link FixedBitSet} is large enough to hold {@code numBits+1}, returns the given
@@ -212,12 +217,12 @@ public final class FixedBitSet extends BitSet {
    * @param numBits the number of bits needed
    */
   public FixedBitSet(int numBits) {
-    this(numBits, DEFAULT_MODIFIER, null);
+    this(numBits, DEFAULT_MODIFIER);
   }
 
-  public FixedBitSet(int numBits, Modifier m, Object sentinel) {
+  public FixedBitSet(int numBits, Modifier m) {
     this.numBits = numBits;
-    bits = m.allocate(bits2words(numBits), sentinel);
+    bits = m.allocate(bits2words(numBits));
     memorySegment = MemorySegment.ofBuffer(bits);
     numWords = bits.remaining();
   }
@@ -680,11 +685,11 @@ public final class FixedBitSet extends BitSet {
 
   @Override
   public FixedBitSet clone() {
-    return clone(DEFAULT_MODIFIER, null);
+    return clone(DEFAULT_MODIFIER);
   }
 
-  public FixedBitSet clone(Modifier m, Object sentinel) {
-    LongBuffer bits = m.allocate(this.bits.capacity(), sentinel);
+  public FixedBitSet clone(Modifier m) {
+    LongBuffer bits = m.allocate(this.bits.capacity());
     this.bits.limit(numWords);
     bits.put(this.bits);
     bits.clear();
@@ -723,10 +728,10 @@ public final class FixedBitSet extends BitSet {
 
   /** Make a copy of the given bits. */
   public static FixedBitSet copyOf(Bits bits) {
-    return copyOf(bits, DEFAULT_MODIFIER, null);
+    return copyOf(bits, DEFAULT_MODIFIER);
   }
 
-  public static FixedBitSet copyOf(Bits bits, Modifier m, Object sentinel) {
+  public static FixedBitSet copyOf(Bits bits, Modifier m) {
     if (bits instanceof FixedBits) {
       // restore the original FixedBitSet
       FixedBits fixedBits = (FixedBits) bits;
@@ -734,10 +739,10 @@ public final class FixedBitSet extends BitSet {
     }
 
     if (bits instanceof FixedBitSet) {
-      return ((FixedBitSet) bits).clone(m, sentinel);
+      return ((FixedBitSet) bits).clone(m);
     } else {
       int length = bits.length();
-      FixedBitSet bitSet = new FixedBitSet(length, m, sentinel);
+      FixedBitSet bitSet = new FixedBitSet(length, m);
       bitSet.set(0, length);
       for (int i = 0; i < length; ++i) {
         if (bits.get(i) == false) {
