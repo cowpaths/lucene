@@ -40,7 +40,6 @@ public final class FixedBitSet extends BitSet {
   private static final long BASE_RAM_BYTES_USED =
       RamUsageEstimator.shallowSizeOfInstance(FixedBitSet.class);
 
-  private final Modifier m;
   private final LongBuffer bits; // Array of longs holding the bits
   private final MemorySegment memorySegment;
   private final int numBits; // The number of bits in use
@@ -106,7 +105,7 @@ public final class FixedBitSet extends BitSet {
       if (numWords >= arr.remaining()) {
         arr = m.grow(arr, numWords + 1);
       }
-      return new FixedBitSet(arr, arr.remaining() << 6, m);
+      return new FixedBitSet(arr, arr.remaining() << 6);
     }
   }
 
@@ -231,7 +230,6 @@ public final class FixedBitSet extends BitSet {
   }
 
   public FixedBitSet(int numBits, Modifier m) {
-    this.m = m;
     this.numBits = numBits;
     bits = m.allocate(bits2words(numBits));
     memorySegment = MemorySegment.ofBuffer(bits);
@@ -247,11 +245,6 @@ public final class FixedBitSet extends BitSet {
    * @param numBits the number of bits actually needed
    */
   public FixedBitSet(LongBuffer storedBits, int numBits) {
-    this(storedBits, numBits, DEFAULT_MODIFIER);
-  }
-
-  public FixedBitSet(LongBuffer storedBits, int numBits, Modifier m) {
-    this.m = m;
     this.numWords = bits2words(numBits);
     if (numWords > storedBits.remaining()) {
       throw new IllegalArgumentException(
@@ -701,12 +694,16 @@ public final class FixedBitSet extends BitSet {
 
   @Override
   public FixedBitSet clone() {
+    return clone(DEFAULT_MODIFIER);
+  }
+
+  public FixedBitSet clone(Modifier m) {
     LongBuffer bits = m.allocate(this.bits.capacity());
     this.bits.limit(numWords);
     bits.put(this.bits);
     bits.clear();
-    this.bits.flip();
-    return new FixedBitSet(bits, numBits, m);
+    this.bits.clear();
+    return new FixedBitSet(bits, numBits);
   }
 
   @Override
@@ -747,11 +744,11 @@ public final class FixedBitSet extends BitSet {
     if (bits instanceof FixedBits) {
       // restore the original FixedBitSet
       FixedBits fixedBits = (FixedBits) bits;
-      bits = new FixedBitSet(fixedBits.bits, fixedBits.length, m);
+      bits = new FixedBitSet(fixedBits.bits, fixedBits.length);
     }
 
     if (bits instanceof FixedBitSet) {
-      return ((FixedBitSet) bits).clone();
+      return ((FixedBitSet) bits).clone(m);
     } else {
       int length = bits.length();
       FixedBitSet bitSet = new FixedBitSet(length, m);
@@ -765,7 +762,7 @@ public final class FixedBitSet extends BitSet {
     }
   }
 
-  public static void copyTo(Bits bits, FixedBitSet[] dest, Modifier m) {
+  public static void copyTo(Bits bits, FixedBitSet[] dest) {
     LongBuffer buf;
     int len;
     if (bits instanceof FixedBits) {
