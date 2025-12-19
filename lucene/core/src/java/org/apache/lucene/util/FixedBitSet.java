@@ -46,28 +46,40 @@ public final class FixedBitSet extends BitSet {
   private final int numWords; // The exact number of longs needed to hold numBits (<= bits.length)
 
   public interface Modifier {
-    LongBuffer allocate(int numWords);
-    LongBuffer grow(LongBuffer arr, int minSize);
-    LongBuffer copyOf(long[] words);
-    IntBuffer allocateInt(int size);
+    default LongBuffer allocate(int numWords) {
+      return allocate(numWords, null);
+    }
+    default LongBuffer grow(LongBuffer arr, int minSize) {
+      return grow(arr, minSize, null);
+    }
+    default LongBuffer copyOf(long[] words) {
+      return copyOf(words, null);
+    }
+    default IntBuffer allocateInt(int size) {
+      return allocateInt(size, null);
+    }
+    LongBuffer allocate(int numWords, Object sentinel);
+    LongBuffer grow(LongBuffer arr, int minSize, Object sentinel);
+    LongBuffer copyOf(long[] words, Object sentinel);
+    IntBuffer allocateInt(int size, Object sentinel);
   }
 
   public static final Modifier DEFAULT_MODIFIER = new Modifier() {
     @Override
-    public LongBuffer allocate(int numWords) {
+    public LongBuffer allocate(int numWords, Object sentinel) {
       return ByteBuffer.allocate(numWords << 3).asLongBuffer();
     }
 
     @Override
-    public IntBuffer allocateInt(int size) {
+    public IntBuffer allocateInt(int size, Object sentinel) {
       return ByteBuffer.allocate(size << 2).asIntBuffer();
     }
 
     @Override
-    public LongBuffer grow(LongBuffer arr, int minSize) {
+    public LongBuffer grow(LongBuffer arr, int minSize, Object sentinel) {
       assert minSize >= 0 : "size must be positive (got " + minSize + "): likely integer overflow?";
       if (arr.remaining() < minSize) {
-        LongBuffer ret = allocate(ArrayUtil.oversize(minSize, Long.BYTES));
+        LongBuffer ret = allocate(ArrayUtil.oversize(minSize, Long.BYTES), sentinel);
         ret.put(arr);
         ret.clear();
         arr.flip(); // restore
@@ -78,8 +90,8 @@ public final class FixedBitSet extends BitSet {
     }
 
     @Override
-    public LongBuffer copyOf(long[] words) {
-      return allocate(words.length).put(0, words);
+    public LongBuffer copyOf(long[] words, Object sentinel) {
+      return allocate(words.length, sentinel).put(0, words);
     }
   };
   /**
@@ -91,10 +103,10 @@ public final class FixedBitSet extends BitSet {
    * greater than {@code numBits}.
    */
   public static FixedBitSet ensureCapacity(FixedBitSet bits, int numBits) {
-    return ensureCapacity(bits, numBits, DEFAULT_MODIFIER);
+    return ensureCapacity(bits, numBits, DEFAULT_MODIFIER, null);
   }
 
-  public static FixedBitSet ensureCapacity(FixedBitSet bits, int numBits, Modifier m) {
+  public static FixedBitSet ensureCapacity(FixedBitSet bits, int numBits, Modifier m, Object sentinel) {
     if (numBits < bits.numBits) {
       return bits;
     } else {
@@ -103,7 +115,7 @@ public final class FixedBitSet extends BitSet {
       int numWords = bits2words(numBits);
       LongBuffer arr = bits.getBits();
       if (numWords >= arr.remaining()) {
-        arr = m.grow(arr, numWords + 1);
+        arr = m.grow(arr, numWords + 1, sentinel);
       }
       return new FixedBitSet(arr, arr.remaining() << 6);
     }
@@ -226,12 +238,12 @@ public final class FixedBitSet extends BitSet {
    * @param numBits the number of bits needed
    */
   public FixedBitSet(int numBits) {
-    this(numBits, DEFAULT_MODIFIER);
+    this(numBits, DEFAULT_MODIFIER, null);
   }
 
-  public FixedBitSet(int numBits, Modifier m) {
+  public FixedBitSet(int numBits, Modifier m, Object sentinel) {
     this.numBits = numBits;
-    bits = m.allocate(bits2words(numBits));
+    bits = m.allocate(bits2words(numBits), sentinel);
     memorySegment = MemorySegment.ofBuffer(bits);
     numWords = bits.remaining();
   }
@@ -694,11 +706,11 @@ public final class FixedBitSet extends BitSet {
 
   @Override
   public FixedBitSet clone() {
-    return clone(DEFAULT_MODIFIER);
+    return clone(DEFAULT_MODIFIER, null);
   }
 
-  public FixedBitSet clone(Modifier m) {
-    LongBuffer bits = m.allocate(this.bits.capacity());
+  public FixedBitSet clone(Modifier m, Object sentinel) {
+    LongBuffer bits = m.allocate(this.bits.capacity(), sentinel);
     this.bits.limit(numWords);
     bits.put(this.bits);
     bits.clear();
@@ -737,10 +749,10 @@ public final class FixedBitSet extends BitSet {
 
   /** Make a copy of the given bits. */
   public static FixedBitSet copyOf(Bits bits) {
-    return copyOf(bits, DEFAULT_MODIFIER);
+    return copyOf(bits, DEFAULT_MODIFIER, null);
   }
 
-  public static FixedBitSet copyOf(Bits bits, Modifier m) {
+  public static FixedBitSet copyOf(Bits bits, Modifier m, Object sentinel) {
     if (bits instanceof FixedBits) {
       // restore the original FixedBitSet
       FixedBits fixedBits = (FixedBits) bits;
@@ -748,10 +760,10 @@ public final class FixedBitSet extends BitSet {
     }
 
     if (bits instanceof FixedBitSet) {
-      return ((FixedBitSet) bits).clone(m);
+      return ((FixedBitSet) bits).clone(m, sentinel);
     } else {
       int length = bits.length();
-      FixedBitSet bitSet = new FixedBitSet(length, m);
+      FixedBitSet bitSet = new FixedBitSet(length, m, sentinel);
       bitSet.set(0, length);
       for (int i = 0; i < length; ++i) {
         if (bits.get(i) == false) {
