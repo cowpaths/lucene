@@ -58,25 +58,11 @@ public final class FixedBitSet extends BitSet {
     default IntBuffer allocateInt(int size) {
       return allocateInt(size, null);
     }
-    LongBuffer allocate(int numWords, Object sentinel);
-    LongBuffer grow(LongBuffer arr, int minSize, Object sentinel);
-    LongBuffer copyOf(long[] words, Object sentinel);
-    IntBuffer allocateInt(int size, Object sentinel);
-  }
-
-  public static final Modifier DEFAULT_MODIFIER = new Modifier() {
-    @Override
-    public LongBuffer allocate(int numWords, Object sentinel) {
-      return ByteBuffer.allocate(numWords << 3).asLongBuffer();
+    ByteBuffer allocateBytes(int size, Object sentinel);
+    default LongBuffer allocate(int numWords, Object sentinel) {
+      return allocateBytes(numWords << 3, sentinel).asLongBuffer();
     }
-
-    @Override
-    public IntBuffer allocateInt(int size, Object sentinel) {
-      return ByteBuffer.allocate(size << 2).asIntBuffer();
-    }
-
-    @Override
-    public LongBuffer grow(LongBuffer arr, int minSize, Object sentinel) {
+    default LongBuffer grow(LongBuffer arr, int minSize, Object sentinel) {
       assert minSize >= 0 : "size must be positive (got " + minSize + "): likely integer overflow?";
       if (arr.remaining() < minSize) {
         LongBuffer ret = allocate(ArrayUtil.oversize(minSize, Long.BYTES), sentinel);
@@ -88,12 +74,16 @@ public final class FixedBitSet extends BitSet {
         return arr;
       }
     }
-
-    @Override
-    public LongBuffer copyOf(long[] words, Object sentinel) {
+    default LongBuffer copyOf(long[] words, Object sentinel) {
       return allocate(words.length, sentinel).put(0, words);
     }
-  };
+    default IntBuffer allocateInt(int size, Object sentinel) {
+      return allocateBytes(size << 2, sentinel).asIntBuffer();
+    }
+  }
+
+  public static final Modifier DEFAULT_MODIFIER = (size, sentinel) -> ByteBuffer.allocate(size);
+
   /**
    * If the given {@link FixedBitSet} is large enough to hold {@code numBits+1}, returns the given
    * bits, otherwise returns a new {@link FixedBitSet} which can hold the requested number of bits.
