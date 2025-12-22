@@ -26,7 +26,6 @@ import java.io.IOException;
 import java.lang.foreign.MemorySegment;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.nio.IntBuffer;
 import java.nio.LongBuffer;
 
 /**
@@ -62,12 +61,29 @@ public final class FixedBitSet extends BitSet {
         return arr;
       }
     }
-    ByteBuffer allocateBytes(int size);
-    default IntBuffer allocateInt(int size) {
-      return allocateBytes(size << 2).asIntBuffer();
+    default ByteBuffer allocateBytes(int size) {
+      return ByteBuffer.allocate(size);
     }
-    default Modifier getBatchModifier(Object sentinel, int batchSize) {
-      return this;
+    default ByteBuffer[] allocateBytesArr(int numBytes, Object sentinel) {
+      throw new UnsupportedOperationException();
+    }
+    default Modifier partitioned(int bitShift) {
+      int byteShift = bitShift - 3;
+      int maxBytes = 1 << byteShift;
+      int byteMask = maxBytes - 1;
+      return new Modifier() {
+        @Override
+        public ByteBuffer[] allocateBytesArr(int numBytes, Object sentinel) {
+          int lastIdx = (numBytes - 1) >> byteShift;
+          ByteBuffer[] ret = new ByteBuffer[lastIdx + 1];
+          int len = ((numBytes - 1) & byteMask) + 1;
+          for (int i = lastIdx; i >= 0; i--) {
+            ret[i] = allocateBytes(len);
+            len = maxBytes;
+          }
+          return ret;
+        }
+      };
     }
     @Override
     default void close() {
@@ -75,7 +91,7 @@ public final class FixedBitSet extends BitSet {
     }
   }
 
-  public static final Modifier DEFAULT_MODIFIER = ByteBuffer::allocate;
+  public static final Modifier DEFAULT_MODIFIER = new Modifier() {};
 
   /**
    * If the given {@link FixedBitSet} is large enough to hold {@code numBits+1}, returns the given
@@ -685,11 +701,10 @@ public final class FixedBitSet extends BitSet {
 
   @Override
   public FixedBitSet clone() {
-    return clone(DEFAULT_MODIFIER);
+    return clone(DEFAULT_MODIFIER.allocate(numWords));
   }
 
-  public FixedBitSet clone(Modifier m) {
-    LongBuffer bits = m.allocate(this.bits.capacity());
+  public FixedBitSet clone(LongBuffer bits) {
     this.bits.limit(numWords);
     bits.put(this.bits);
     bits.clear();
@@ -739,7 +754,7 @@ public final class FixedBitSet extends BitSet {
     }
 
     if (bits instanceof FixedBitSet) {
-      return ((FixedBitSet) bits).clone(m);
+      return ((FixedBitSet) bits).clone(m.allocate(((FixedBitSet) bits).numWords));
     } else {
       int length = bits.length();
       FixedBitSet bitSet = new FixedBitSet(length, m);
