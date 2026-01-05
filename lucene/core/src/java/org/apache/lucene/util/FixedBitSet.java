@@ -40,6 +40,25 @@ public final class FixedBitSet extends BitSet {
   private static final long BASE_RAM_BYTES_USED =
       RamUsageEstimator.shallowSizeOfInstance(FixedBitSet.class);
 
+  public static final ByteOrder BYTE_ORDER;
+  static {
+    String bigE = System.getProperty("lucene.bitset.bigendian");
+    if (bigE == null) {
+      BYTE_ORDER = ByteOrder.nativeOrder();
+    } else {
+      switch (bigE) {
+        case "true":
+          BYTE_ORDER = ByteOrder.BIG_ENDIAN;
+          break;
+        case "false":
+          BYTE_ORDER = ByteOrder.LITTLE_ENDIAN;
+          break;
+        default:
+          throw new IllegalArgumentException();
+      }
+    }
+  }
+
   private final LongBuffer bits; // Array of longs holding the bits
   private final MemorySegment memorySegment;
   private final int numBits; // The number of bits in use
@@ -62,7 +81,7 @@ public final class FixedBitSet extends BitSet {
       }
     }
     default ByteBuffer allocateBytes(int size) {
-      return ByteBuffer.allocate(size);
+      return ByteBuffer.allocate(size).order(BYTE_ORDER);
     }
     default ByteBuffer[] allocateBytesArr(int numBytes, Object sentinel) {
       throw new UnsupportedOperationException();
