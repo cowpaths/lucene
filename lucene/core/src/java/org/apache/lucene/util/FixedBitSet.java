@@ -760,6 +760,27 @@ public final class FixedBitSet extends BitSet {
     return (int) ((h >> 32) ^ h) + 0x98761234;
   }
 
+  /**
+   * If the specified {@link Bits} is backed by (or is itself) an instance of {@link FixedBitSet},
+   * this will return a {@link FixedBitSet} view over the same underlying data. This circumvents the
+   * safety protections inherent in the {@link Bits} interface, so the returned object must not be
+   * modified.
+   *
+   * <p>If the specified {@link Bits} is <i>not</i> known to be backed by a {@link FixedBitSet},
+   * this method returns <code>null</code>.
+   */
+  public static FixedBitSet unsafeReadOnlyViewOf(Bits bits) {
+    if (bits instanceof FixedBits) {
+      // restore the original FixedBitSet
+      FixedBits fixedBits = (FixedBits) bits;
+      return new FixedBitSet(fixedBits.bits, fixedBits.length);
+    } else if (bits instanceof FixedBitSet) {
+      return (FixedBitSet) bits;
+    } else {
+      return null;
+    }
+  }
+
   /** Make a copy of the given bits. */
   public static FixedBitSet copyOf(Bits bits) {
     return copyOf(bits, DEFAULT_MODIFIER);
