@@ -131,7 +131,6 @@ allprojects {
       // Enable the vector incubator module on supported Java versions:
       if (rootProject.vectorIncubatorJavaVersions.contains(rootProject.runtimeJavaVersion)) {
         jvmArgs '--add-modules', 'jdk.incubator.vector'
-        jvmArgs '--enable-preview'
       }
       
       if (rootProject.runtimeJavaVersion >= JavaVersion.VERSION_21) {
