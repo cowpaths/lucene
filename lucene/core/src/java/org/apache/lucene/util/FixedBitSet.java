@@ -673,7 +673,19 @@ public final class FixedBitSet extends BitSet {
 
     bits.put(startWord, bits.get(startWord) ^ startmask);
 
-    for (int i = startWord + 1; i < endWord; i++) {
+    // Vectorized middle inversion
+    int i = startWord + 1;
+    int len = endWord - i;
+    if (len >= INC) {
+      for (int lim = i + S.loopBound(len); i < lim; i += INC) {
+        long off = (long) i << 3;
+        LongVector v = LongVector.fromMemorySegment(S, memorySegment, off, NATIVE_ORDER);
+        v.not().intoMemorySegment(memorySegment, off, NATIVE_ORDER);
+      }
+    }
+
+    // Scalar tail for remaining words
+    for (; i < endWord; i++) {
       bits.put(i, ~bits.get(i));
     }
 
