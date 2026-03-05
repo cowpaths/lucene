@@ -489,11 +489,19 @@ public final class FixedBitSet extends BitSet {
   private void or(final int otherOffsetWords, final LongBuffer otherArr, final int otherNumWords) {
     assert otherNumWords + otherOffsetWords <= numWords
         : "numWords=" + numWords + ", otherNumWords=" + otherNumWords;
-    int pos = Math.min(numWords - otherOffsetWords, otherNumWords);
-    final LongBuffer thisArr = this.bits;
-    while (--pos >= 0) {
-      int off = pos + otherOffsetWords;
-      thisArr.put(off, thisArr.get(off) | otherArr.get(pos));
+    int len = Math.min(numWords - otherOffsetWords, otherNumWords);
+    int i = 0;
+    MemorySegment otherSeg = MemorySegment.ofBuffer(otherArr);
+    for (int lim = S.loopBound(len); i < lim; i += INC) {
+      long thisOff = (long) (i + otherOffsetWords) << 3;
+      long otherOff = (long) i << 3;
+      LongVector vThis = LongVector.fromMemorySegment(S, this.memorySegment, thisOff, BYTE_ORDER);
+      LongVector vOther = LongVector.fromMemorySegment(S, otherSeg, otherOff, BYTE_ORDER);
+      vThis.or(vOther).intoMemorySegment(this.memorySegment, thisOff, BYTE_ORDER);
+    }
+    for (; i < len; ++i) {
+      int off = i + otherOffsetWords;
+      this.bits.put(off, this.bits.get(off) | otherArr.get(i));
     }
   }
 
@@ -518,10 +526,17 @@ public final class FixedBitSet extends BitSet {
 
   private void xor(LongBuffer otherBits, int otherNumWords) {
     assert otherNumWords <= numWords : "numWords=" + numWords + ", other.numWords=" + otherNumWords;
-    final LongBuffer thisBits = this.bits;
-    int pos = Math.min(numWords, otherNumWords);
-    while (--pos >= 0) {
-      thisBits.put(pos, thisBits.get(pos) ^ otherBits.get(pos));
+    int len = Math.min(numWords, otherNumWords);
+    int i = 0;
+    MemorySegment otherSeg = MemorySegment.ofBuffer(otherBits);
+    for (int lim = S.loopBound(len); i < lim; i += INC) {
+      long off = (long) i << 3;
+      LongVector vThis = LongVector.fromMemorySegment(S, this.memorySegment, off, BYTE_ORDER);
+      LongVector vOther = LongVector.fromMemorySegment(S, otherSeg, off, BYTE_ORDER);
+      vThis.lanewise(VectorOperators.XOR, vOther).intoMemorySegment(this.memorySegment, off, BYTE_ORDER);
+    }
+    for (; i < len; ++i) {
+      this.bits.put(i, this.bits.get(i) ^ otherBits.get(i));
     }
   }
 
@@ -541,13 +556,20 @@ public final class FixedBitSet extends BitSet {
   }
 
   private void and(final LongBuffer otherArr, final int otherNumWords) {
-    final LongBuffer thisArr = this.bits;
-    int pos = Math.min(this.numWords, otherNumWords);
-    while (--pos >= 0) {
-      thisArr.put(pos, thisArr.get(pos) & otherArr.get(pos));
+    int len = Math.min(this.numWords, otherNumWords);
+    int i = 0;
+    MemorySegment otherSeg = MemorySegment.ofBuffer(otherArr);
+    for (int lim = S.loopBound(len); i < lim; i += INC) {
+      long off = (long) i << 3;
+      LongVector vThis = LongVector.fromMemorySegment(S, this.memorySegment, off, BYTE_ORDER);
+      LongVector vOther = LongVector.fromMemorySegment(S, otherSeg, off, BYTE_ORDER);
+      vThis.and(vOther).intoMemorySegment(this.memorySegment, off, BYTE_ORDER);
+    }
+    for (; i < len; ++i) {
+      this.bits.put(i, this.bits.get(i) & otherArr.get(i));
     }
     if (this.numWords > otherNumWords) {
-      fill(thisArr, otherNumWords, this.numWords, 0L);
+      fill(this.bits, otherNumWords, this.numWords, 0L);
     }
   }
 
@@ -579,11 +601,19 @@ public final class FixedBitSet extends BitSet {
   }
 
   private void andNot(final int otherOffsetWords, final LongBuffer otherArr, final int otherNumWords) {
-    int pos = Math.min(numWords - otherOffsetWords, otherNumWords);
-    final LongBuffer thisArr = this.bits;
-    while (--pos >= 0) {
-      int off = pos + otherOffsetWords;
-      thisArr.put(off, thisArr.get(off) & ~otherArr.get(pos));
+    int len = Math.min(numWords - otherOffsetWords, otherNumWords);
+    int i = 0;
+    MemorySegment otherSeg = MemorySegment.ofBuffer(otherArr);
+    for (int lim = S.loopBound(len); i < lim; i += INC) {
+      long thisOff = (long) (i + otherOffsetWords) << 3;
+      long otherOff = (long) i << 3;
+      LongVector vThis = LongVector.fromMemorySegment(S, this.memorySegment, thisOff, BYTE_ORDER);
+      LongVector vOther = LongVector.fromMemorySegment(S, otherSeg, otherOff, BYTE_ORDER);
+      vThis.lanewise(VectorOperators.AND_NOT, vOther).intoMemorySegment(this.memorySegment, thisOff, BYTE_ORDER);
+    }
+    for (; i < len; ++i) {
+      int off = i + otherOffsetWords;
+      this.bits.put(off, this.bits.get(off) & ~otherArr.get(i));
     }
   }
 
