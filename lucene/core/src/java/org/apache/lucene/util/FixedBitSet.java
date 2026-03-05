@@ -35,6 +35,7 @@ import java.nio.LongBuffer;
  *
  * @lucene.internal
  */
+@SuppressWarnings("preview")
 public final class FixedBitSet extends BitSet {
 
   private static final long BASE_RAM_BYTES_USED =
@@ -232,7 +233,7 @@ public final class FixedBitSet extends BitSet {
         tot += Long.bitCount(a.bits.get(i) & ~b.bits.get(i));
       }
       for (int lim = Math.min(a.numWords, alignedLim); i < lim; ++i) {
-        tot += Long.bitCount(a.bits.get(i) & ~b.bits.get(i));
+        tot += Long.bitCount(a.bits.get(i));
       }
     }
     for (int lim = S.loopBound(a.numWords); i < lim; i += INC) {
