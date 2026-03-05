@@ -18,6 +18,7 @@ package org.apache.lucene.tests.util;
 
 import java.io.ByteArrayOutputStream;
 import java.io.File;
+import java.lang.foreign.MemorySegment;
 import java.lang.reflect.Array;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
@@ -167,6 +168,7 @@ public final class RamUsageTester {
             (clazz instanceof CharsetEncoder)
                 || (clazz instanceof CharsetDecoder)
                 || (clazz instanceof ReentrantReadWriteLock)
+                || (clazz instanceof MemorySegment)
                 || (clazz instanceof AtomicReference<?>);
     if (isIgnorable.test(ob)) {
       return accumulator.accumulateObject(ob, 0, Collections.emptyMap(), stack);

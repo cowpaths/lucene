@@ -16,10 +16,14 @@
  */
 package org.apache.lucene.util;
 
+import jdk.incubator.vector.LongVector;
+import jdk.incubator.vector.VectorOperators;
+import jdk.incubator.vector.VectorSpecies;
 import org.apache.lucene.search.DocIdSet;
 import org.apache.lucene.search.DocIdSetIterator;
 import java.io.Closeable;
 import java.io.IOException;
+import java.lang.foreign.MemorySegment;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.LongBuffer;
@@ -56,6 +60,7 @@ public final class FixedBitSet extends BitSet {
   }
 
   private final LongBuffer bits; // Array of longs holding the bits
+  private final MemorySegment memorySegment;
   private final int numBits; // The number of bits in use
   private final int numWords; // The exact number of longs needed to hold numBits (<= bits.length)
 
@@ -137,6 +142,9 @@ public final class FixedBitSet extends BitSet {
     return ((numBits - 1) >> 6) + 1;
   }
 
+  private static final VectorSpecies<Long> S = LongVector.SPECIES_PREFERRED;
+  private static final int INC = S.length();
+
   /**
    * Returns the popcount or cardinality of the intersection of the two sets. Neither set is
    * modified.
@@ -145,7 +153,14 @@ public final class FixedBitSet extends BitSet {
     // Depends on the ghost bits being clear!
     long tot = 0;
     final int numCommonWords = Math.min(a.numWords, b.numWords);
-    for (int i = 0; i < numCommonWords; ++i) {
+    int i = 0;
+    for (int lim = S.loopBound(numCommonWords); i < lim; i += INC) {
+      long off = (long) i << 3;
+      LongVector vA = LongVector.fromMemorySegment(S, a.memorySegment, off, BYTE_ORDER);
+      LongVector vB = LongVector.fromMemorySegment(S, b.memorySegment, off, BYTE_ORDER);
+      tot += vA.and(vB).lanewise(VectorOperators.BIT_COUNT).reduceLanes(VectorOperators.ADD);
+    }
+    for (; i < numCommonWords; ++i) {
       tot += Long.bitCount(a.bits.get(i) & b.bits.get(i));
     }
     return tot;
@@ -156,14 +171,42 @@ public final class FixedBitSet extends BitSet {
     // Depends on the ghost bits being clear!
     long tot = 0;
     final int numCommonWords = Math.min(a.numWords, b.numWords);
-    for (int i = 0; i < numCommonWords; ++i) {
-      tot += Long.bitCount(a.bits.get(i) | b.bits.get(i));
+    int i = 0;
+    for (int lim = S.loopBound(numCommonWords); i < lim; i += INC) {
+      long off = (long) i << 3;
+      LongVector vA = LongVector.fromMemorySegment(S, a.memorySegment, off, BYTE_ORDER);
+      LongVector vB = LongVector.fromMemorySegment(S, b.memorySegment, off, BYTE_ORDER);
+      tot += vA.or(vB).lanewise(VectorOperators.BIT_COUNT).reduceLanes(VectorOperators.ADD);
     }
-    for (int i = numCommonWords; i < a.numWords; ++i) {
+    int alignedLim;
+    if (i == numCommonWords) {
+      alignedLim = i;
+    } else {
+      alignedLim = i + INC;
+      do {
+        tot += Long.bitCount(a.bits.get(i) | b.bits.get(i));
+      } while (++i < numCommonWords);
+      for (int lim = Math.min(a.numWords, alignedLim); i < lim; ++i) {
+        tot += Long.bitCount(a.bits.get(i));
+      }
+      for (int j = numCommonWords, lim = Math.min(b.numWords, alignedLim); j < lim; ++j) {
+        tot += Long.bitCount(b.bits.get(j));
+      }
+    }
+    for (int lim = S.loopBound(a.numWords); i < lim; i += INC) {
+      LongVector v = LongVector.fromMemorySegment(S, a.memorySegment, (long) i << 3, BYTE_ORDER);
+      tot += v.lanewise(VectorOperators.BIT_COUNT).reduceLanes(VectorOperators.ADD);
+    }
+    int j = alignedLim;
+    for (int lim = S.loopBound(b.numWords); j < lim; j += INC) {
+      LongVector v = LongVector.fromMemorySegment(S, b.memorySegment, (long) j << 3, BYTE_ORDER);
+      tot += v.lanewise(VectorOperators.BIT_COUNT).reduceLanes(VectorOperators.ADD);
+    }
+    for (; i < a.numWords; ++i) {
       tot += Long.bitCount(a.bits.get(i));
     }
-    for (int i = numCommonWords; i < b.numWords; ++i) {
-      tot += Long.bitCount(b.bits.get(i));
+    for (; j < b.numWords; ++j) {
+      tot += Long.bitCount(b.bits.get(j));
     }
     return tot;
   }
@@ -176,10 +219,27 @@ public final class FixedBitSet extends BitSet {
     // Depends on the ghost bits being clear!
     long tot = 0;
     final int numCommonWords = Math.min(a.numWords, b.numWords);
-    for (int i = 0; i < numCommonWords; ++i) {
-      tot += Long.bitCount(a.bits.get(i) & ~b.bits.get(i));
+    int i = 0;
+    for (int lim = S.loopBound(numCommonWords); i < lim; i += INC) {
+      long off = (long) i << 3;
+      LongVector vA = LongVector.fromMemorySegment(S, a.memorySegment, off, BYTE_ORDER);
+      LongVector vB = LongVector.fromMemorySegment(S, b.memorySegment, off, BYTE_ORDER);
+      tot += vA.lanewise(VectorOperators.AND_NOT, vB).lanewise(VectorOperators.BIT_COUNT).reduceLanes(VectorOperators.ADD);
     }
-    for (int i = numCommonWords; i < a.numWords; ++i) {
+    if (i < numCommonWords) {
+      int alignedLim = i + INC;
+      for (; i < numCommonWords; ++i) {
+        tot += Long.bitCount(a.bits.get(i) & ~b.bits.get(i));
+      }
+      for (int lim = Math.min(a.numWords, alignedLim); i < lim; ++i) {
+        tot += Long.bitCount(a.bits.get(i) & ~b.bits.get(i));
+      }
+    }
+    for (int lim = S.loopBound(a.numWords); i < lim; i += INC) {
+      LongVector v = LongVector.fromMemorySegment(S, a.memorySegment, (long) i << 3, BYTE_ORDER);
+      tot += v.lanewise(VectorOperators.BIT_COUNT).reduceLanes(VectorOperators.ADD);
+    }
+    for (; i < a.numWords; ++i) {
       tot += Long.bitCount(a.bits.get(i));
     }
     return tot;
@@ -198,6 +258,7 @@ public final class FixedBitSet extends BitSet {
   public FixedBitSet(int numBits, Modifier m) {
     this.numBits = numBits;
     bits = m.allocate(bits2words(numBits));
+    memorySegment = MemorySegment.ofBuffer(bits);
     numWords = bits.remaining();
   }
 
@@ -217,6 +278,7 @@ public final class FixedBitSet extends BitSet {
     }
     this.numBits = numBits;
     this.bits = storedBits;
+    this.memorySegment = MemorySegment.ofBuffer(bits);
 
     assert verifyGhostBitsClear();
   }
@@ -270,7 +332,12 @@ public final class FixedBitSet extends BitSet {
   public int cardinality() {
     // Depends on the ghost bits being clear!
     long tot = 0;
-    for (int i = 0; i < numWords; ++i) {
+    int i = 0;
+    for (int lim = S.loopBound(numWords); i < lim; i += INC) {
+      LongVector v = LongVector.fromMemorySegment(S, memorySegment, (long) i << 3, BYTE_ORDER);
+      tot += v.lanewise(VectorOperators.BIT_COUNT).reduceLanes(VectorOperators.ADD);
+    }
+    for (; i < numWords; ++i) {
       tot += Long.bitCount(bits.get(i));
     }
     return Math.toIntExact(tot);
@@ -293,7 +360,12 @@ public final class FixedBitSet extends BitSet {
     long popCount = 0;
     int maxWord;
     for (maxWord = 0; maxWord + interval < numWords; maxWord += interval) {
-      for (int i = 0; i < rangeLength; ++i) {
+      int i = 0;
+      for (int lim = S.loopBound(rangeLength); i < lim; i += INC) {
+        LongVector v = LongVector.fromMemorySegment(S, memorySegment, (long) (maxWord + i) << 3, BYTE_ORDER);
+        popCount += v.lanewise(VectorOperators.BIT_COUNT).reduceLanes(VectorOperators.ADD);
+      }
+      for (; i < rangeLength; ++i) {
         popCount += Long.bitCount(bits.get(maxWord + i));
       }
     }

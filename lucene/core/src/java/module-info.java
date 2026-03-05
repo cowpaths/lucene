@@ -23,6 +23,7 @@ module org.apache.lucene.core {
   requires java.logging;
   requires static jdk.unsupported; // this is optional but without it MMapDirectory won't be enabled
   requires static jdk.management; // this is optional but explicit declaration is recommended
+  requires jdk.incubator.vector;
 
   exports org.apache.lucene.analysis.standard;
   exports org.apache.lucene.analysis.tokenattributes;
