@@ -17,7 +17,6 @@
 package org.apache.lucene.util;
 
 import java.io.IOException;
-import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Random;
 import org.apache.lucene.search.DocIdSetIterator;
@@ -328,7 +327,7 @@ public class TestFixedBitSet extends BaseBitSetTestCase<FixedBitSet> {
     if (random().nextBoolean()) {
       int bits2words = FixedBitSet.bits2words(numBits);
       long[] words = new long[bits2words + random().nextInt(100)];
-      bs = new FixedBitSet(ByteBuffer.allocate(words.length << 3).asLongBuffer().put(0, words), numBits);
+      bs = new FixedBitSet(FixedBitSet.DEFAULT_MODIFIER.allocate(words.length).put(0, words), numBits);
     } else {
       bs = new FixedBitSet(numBits);
     }
