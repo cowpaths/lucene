@@ -572,7 +572,7 @@ public final class FixedBitSet extends BitSet {
       this.bits.put(i, this.bits.get(i) & otherArr.get(i));
     }
     if (this.numWords > otherNumWords) {
-      fill(this.bits, otherNumWords, this.numWords, 0L);
+      fill(otherNumWords, this.numWords, 0L);
     }
   }
 
@@ -714,13 +714,26 @@ public final class FixedBitSet extends BitSet {
     }
 
     bits.put(startWord, bits.get(startWord) | startmask);
-    fill(bits, startWord + 1, endWord, -1L);
+    fill(startWord + 1, endWord, -1L);
     bits.put(endWord, bits.get(endWord) | endmask);
   }
 
-  private static void fill(LongBuffer bits, int startWord, int endWord, long val) {
-    for (int i = startWord; i < endWord; i++)
+  private void fill(int startWord, int endWord, long val) {
+    assert val == 0 || val == -1L; // otherwise ByteOrder matters
+    int i = startWord;
+    int len = endWord - startWord;
+
+    if (len >= INC) {
+      // Create a vector where all lanes contain 'val' (e.g., 0L or -1L)
+      LongVector fillVector = LongVector.broadcast(S, val);
+      for (int lim = startWord + S.loopBound(len); i < lim; i += INC) {
+        fillVector.intoMemorySegment(memorySegment, (long) i << 3, NATIVE_ORDER);
+      }
+    }
+    // Scalar tail
+    for (; i < endWord; i++) {
       bits.put(i, val);
+    }
   }
 
   @Override
@@ -748,7 +761,7 @@ public final class FixedBitSet extends BitSet {
     }
 
     bits.put(startWord, bits.get(startWord) & startmask);
-    fill(bits, startWord + 1, endWord, 0L);
+    fill(startWord + 1, endWord, 0L);
     bits.put(endWord, bits.get(endWord) & endmask);
   }
 
