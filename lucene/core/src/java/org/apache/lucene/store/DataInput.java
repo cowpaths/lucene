@@ -17,6 +17,7 @@
 package org.apache.lucene.store;
 
 import java.io.IOException;
+import java.nio.LongBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.Collections;
 import java.util.HashMap;
@@ -193,6 +194,22 @@ public abstract class DataInput implements Cloneable {
     Objects.checkFromIndexSize(offset, length, dst.length);
     for (int i = 0; i < length; ++i) {
       dst[offset + i] = readLong();
+    }
+  }
+
+  /**
+   * See {@link #readLongs(long[], int, int)}
+   *
+   * <p>We need this variant in order to construct {@link org.apache.lucene.util.FixedBitSet},
+   * for which explicitly vectorized operations require {@link LongBuffer} instances backed by
+   * {@link java.nio.ByteBuffer} -- either on-heap or direct are ok.
+   *
+   * @lucene.experimental
+   */
+  public void readLongs(LongBuffer dst, int offset, int length) throws IOException {
+    Objects.checkFromIndexSize(offset, length, dst.remaining());
+    for (int i = 0; i < length; ++i) {
+      dst.put(offset + i, readLong());
     }
   }
 

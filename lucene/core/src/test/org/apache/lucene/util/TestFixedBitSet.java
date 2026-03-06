@@ -17,8 +17,12 @@
 package org.apache.lucene.util;
 
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Random;
+import java.util.concurrent.TimeUnit;
+
+import org.apache.lucene.internal.vectorization.VectorUtilSupport;
 import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.tests.util.BaseBitSetTestCase;
 import org.apache.lucene.tests.util.TestUtil;
@@ -48,6 +52,62 @@ public class TestFixedBitSet extends BaseBitSetTestCase<FixedBitSet> {
     }
     final int cardinality = set.cardinality();
     assertEquals(cardinality, set.approximateCardinality(), cardinality / 20); // 5% error at most
+  }
+
+  /**
+   * Check performance and reliability of some vectorized FixedBitSet ops.
+   *
+   * <p>To test real-world performance, should be run with {@code -Ptests.jvmargs='-XX:-TieredCompilation'}.
+   */
+  public void testVectorizedFBSPerf() {
+    if (Constants.IS_CLIENT_VM) {
+      System.err.println("C2 compiler disabled; don't run FBSPerf test (run with `-Ptests.jvmargs='-XX:-TieredCompilation'`)");
+      return;
+    }
+    int reps = 1000;
+    int size = 1 << 23; // 1m (size is in bits)
+    int numBytes = FixedBitSet.bits2words(size) << 3;
+    Random r = random();
+
+    // THIS BREAKS VECTORIZATION
+    //FixedBitSet data1 = new FixedBitSet(LongBuffer.wrap(new long[FixedBitSet.bits2words(size)]), size);
+
+    // mess with alignment to test vectorization alignment
+    int messupAlignment1 = r.nextInt(64); // 512 bits
+    int messupAlignment2 = r.nextInt(64); // 512 bits
+    FixedBitSet data1 = new FixedBitSet(ByteBuffer.allocateDirect(numBytes + messupAlignment1).slice(messupAlignment1, numBytes).asLongBuffer(), size);
+    FixedBitSet data2 = new FixedBitSet(ByteBuffer.wrap(new byte[numBytes + messupAlignment2], messupAlignment2, numBytes).asLongBuffer(), size);
+    for (int i = size - 1; i >= 0; i--) {
+      if (r.nextBoolean()) {
+        data1.set(i);
+      }
+      if (r.nextBoolean()) {
+        data2.set(i);
+      }
+    }
+    long nanos = 0;
+    for (int i = 10; i > 0; i--) {
+      nanos += fbsPerf(reps, data1, data2);
+    }
+    System.err.println("avg: "+TimeUnit.NANOSECONDS.toMillis(nanos / 10));
+  }
+
+  private static long fbsPerf(int reps, FixedBitSet data1, FixedBitSet data2) {
+    long start = System.nanoTime();
+    int card = -1;
+    for (int i = reps; i > 0; i--) {
+      FixedBitSet clone = data1.clone();
+      clone.and(data2);
+      int iterCard = clone.cardinality();
+      if (card == -1) {
+        card = iterCard;
+      } else {
+        assertEquals(card, iterCard);
+      }
+    }
+    long ret = System.nanoTime() - start;
+    System.err.println("\tDONE! "+ TimeUnit.NANOSECONDS.toMillis(ret));
+    return ret;
   }
 
   void doGet(java.util.BitSet a, FixedBitSet b) {

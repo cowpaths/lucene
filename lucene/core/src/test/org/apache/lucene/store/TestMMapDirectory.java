@@ -111,7 +111,7 @@ public class TestMMapDirectory extends BaseDirectoryTestCase {
       try (IndexInput in = mmapDir.openInput("bytes", IOContext.DEFAULT)) {
         assertThrows(NullPointerException.class, () -> in.readBytes(null, 0, 1));
         assertThrows(NullPointerException.class, () -> in.readFloats(null, 0, 1));
-        assertThrows(NullPointerException.class, () -> in.readLongs(null, 0, 1));
+        assertThrows(NullPointerException.class, () -> in.readLongs((long[]) null, 0, 1));
       }
     }
   }
