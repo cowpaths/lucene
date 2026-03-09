@@ -21,8 +21,6 @@ import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Random;
 import java.util.concurrent.TimeUnit;
-
-import org.apache.lucene.internal.vectorization.VectorUtilSupport;
 import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.tests.util.BaseBitSetTestCase;
 import org.apache.lucene.tests.util.TestUtil;
@@ -59,12 +57,23 @@ public class TestFixedBitSet extends BaseBitSetTestCase<FixedBitSet> {
    *
    * <p>To test real-world performance, should be run with {@code -Ptests.jvmargs='-XX:-TieredCompilation'}.
    */
-  public void testVectorizedFBSPerf() {
+  public void testVectorizedBulkPerf() throws IOException {
+    testVectorizedFBSPerf(1000, TestFixedBitSet::fbsPerf);
+  }
+
+  public void testVectorizedIterPerf() throws IOException {
+    testVectorizedFBSPerf(100, TestFixedBitSet::fbsIterPerf);
+  }
+
+  private interface PerfFunction {
+    long call(int reps, FixedBitSet one, FixedBitSet two) throws IOException;
+  }
+
+  private static void testVectorizedFBSPerf(int reps, PerfFunction func) throws IOException {
     if (Constants.IS_CLIENT_VM) {
       System.err.println("C2 compiler disabled; don't run FBSPerf test (run with `-Ptests.jvmargs='-XX:-TieredCompilation'`)");
       return;
     }
-    int reps = 1000;
     int size = 1 << 23; // 1m (size is in bits)
     int numBytes = FixedBitSet.bits2words(size) << 3;
     Random r = random();
@@ -75,8 +84,8 @@ public class TestFixedBitSet extends BaseBitSetTestCase<FixedBitSet> {
     // mess with alignment to test vectorization alignment
     int messupAlignment1 = r.nextInt(64); // 512 bits
     int messupAlignment2 = r.nextInt(64); // 512 bits
-    FixedBitSet data1 = new FixedBitSet(ByteBuffer.allocateDirect(numBytes + messupAlignment1).slice(messupAlignment1, numBytes).asLongBuffer(), size);
-    FixedBitSet data2 = new FixedBitSet(ByteBuffer.wrap(new byte[numBytes + messupAlignment2], messupAlignment2, numBytes).asLongBuffer(), size);
+    FixedBitSet data1 = new FixedBitSet(ByteBuffer.allocateDirect(numBytes + messupAlignment1).slice(messupAlignment1, numBytes).order(FixedBitSet.BYTE_ORDER).asLongBuffer(), size);
+    FixedBitSet data2 = new FixedBitSet(ByteBuffer.wrap(new byte[numBytes + messupAlignment2], messupAlignment2, numBytes).order(FixedBitSet.BYTE_ORDER).asLongBuffer(), size);
     for (int i = size - 1; i >= 0; i--) {
       if (r.nextBoolean()) {
         data1.set(i);
@@ -87,7 +96,7 @@ public class TestFixedBitSet extends BaseBitSetTestCase<FixedBitSet> {
     }
     long nanos = 0;
     for (int i = 10; i > 0; i--) {
-      nanos += fbsPerf(reps, data1, data2);
+      nanos += func.call(reps, data1, data2);
     }
     System.err.println("avg: "+TimeUnit.NANOSECONDS.toMillis(nanos / 10));
   }
@@ -103,6 +112,22 @@ public class TestFixedBitSet extends BaseBitSetTestCase<FixedBitSet> {
         card = iterCard;
       } else {
         assertEquals(card, iterCard);
+      }
+    }
+    long ret = System.nanoTime() - start;
+    System.err.println("\tDONE! "+ TimeUnit.NANOSECONDS.toMillis(ret));
+    return ret;
+  }
+
+  private static long fbsIterPerf(int reps, FixedBitSet data1, FixedBitSet data2) throws IOException {
+    FixedBitSet dataBoth = data1.clone();
+    dataBoth.and(data2);
+    long start = System.nanoTime();
+    for (int i = reps; i > 0; i--) {
+      DocIdSetIterator disiBoth = new BitSetIterator(dataBoth, dataBoth.length());
+      for (int doc = disiBoth.nextDoc(); doc != DocIdSetIterator.NO_MORE_DOCS; doc = disiBoth.nextDoc()) {
+        assertTrue(data1.get(doc));
+        assertTrue(data2.get(doc));
       }
     }
     long ret = System.nanoTime() - start;
