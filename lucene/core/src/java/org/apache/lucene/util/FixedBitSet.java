@@ -17,7 +17,6 @@
 package org.apache.lucene.util;
 
 import jdk.incubator.vector.LongVector;
-import jdk.incubator.vector.VectorMask;
 import jdk.incubator.vector.VectorOperators;
 import jdk.incubator.vector.VectorSpecies;
 import org.apache.lucene.search.DocIdSet;
@@ -424,12 +423,6 @@ public final class FixedBitSet extends BitSet {
     return (extantWord & bitmask) != 0;
   }
 
-  /**
-   * Require half-length of vector to be read in as scalars before "shifting into high gear"
-   * at next opportunity
-   */
-  private static final int MIN_FULL_ZERO = S.length() >> 1;
-
   @Override
   public int nextSetBit(int index) {
     // Depends on the ghost bits being clear!
@@ -441,25 +434,10 @@ public final class FixedBitSet extends BitSet {
       return index + Long.numberOfTrailingZeros(word);
     }
 
-    final int vectorizedRemaining = Math.max(0, S.loopBound(numWords - (++i + MIN_FULL_ZERO)));
-    for (int scalarLim = numWords - vectorizedRemaining; i < scalarLim; i++) {
+    while (++i < numWords) {
       word = bits.get(i);
       if (word != 0) {
         return (i << 6) + Long.numberOfTrailingZeros(word);
-      }
-    }
-
-    // --- tail-aligned vectorized ---
-    for (; i < numWords; i += INC) {
-      // Load the vector from the cached memory segment
-      LongVector v = LongVector.fromMemorySegment(S, memorySegment, (long) i << 3, NATIVE_ORDER);
-
-      // Find lanes that are NOT zero
-      VectorMask<Long> nonZeroMask = v.compare(VectorOperators.NE, 0L);
-
-      if (nonZeroMask.anyTrue()) {
-        int targetWord = i + nonZeroMask.firstTrue();
-        return (targetWord << 6) + Long.numberOfTrailingZeros(bits.get(targetWord));
       }
     }
 
