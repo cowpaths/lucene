@@ -74,7 +74,7 @@ public class TestFixedBitSet extends BaseBitSetTestCase<FixedBitSet> {
       System.err.println("C2 compiler disabled; don't run FBSPerf test (run with `-Ptests.jvmargs='-XX:-TieredCompilation'`)");
       return;
     }
-    int size = 1 << 23; // 1m (size is in bits)
+    int size = 2 << 23; // 2m (size is in bits)
     int numBytes = FixedBitSet.bits2words(size) << 3;
     Random r = random();
 
@@ -92,6 +92,14 @@ public class TestFixedBitSet extends BaseBitSetTestCase<FixedBitSet> {
       }
       if (r.nextBoolean()) {
         data2.set(i);
+      }
+    }
+    if (false) {
+      // make sparse
+      for (int i = 0, lim = data1.length(); i < lim; i += r.nextInt(8192)) {
+        int toIdx = i + r.nextInt(8192);
+        data1.clear(i, Math.min(lim, toIdx));
+        i = toIdx;
       }
     }
     long nanos = 0;
