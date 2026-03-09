@@ -792,10 +792,9 @@ public final class FixedBitSet extends BitSet {
   }
 
   public FixedBitSet clone(LongBuffer bits) {
-    this.bits.limit(numWords);
-    bits.put(this.bits);
+    LongBuffer template = this.bits.slice();
+    bits.put(template);
     bits.clear();
-    this.bits.clear();
     return new FixedBitSet(bits, numBits);
   }
 
