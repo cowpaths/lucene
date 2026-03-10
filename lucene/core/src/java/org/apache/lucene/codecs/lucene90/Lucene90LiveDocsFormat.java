@@ -102,9 +102,9 @@ public final class Lucene90LiveDocsFormat extends LiveDocsFormat {
 
   private FixedBitSet readFixedBitSet(IndexInput input, int length) throws IOException {
     int lim = FixedBitSet.bits2words(length);
-    LongBuffer data = FixedBitSet.DEFAULT_MODIFIER.allocate(lim);
+    FixedBitSet.LongBufferStruct data = FixedBitSet.DEFAULT_MODIFIER.allocate(lim);
     for (int i = 0; i < lim; i++) {
-      data.put(i, input.readLong());
+      data.buf.put(i, input.readLong());
     }
     return new FixedBitSet(data, length);
   }

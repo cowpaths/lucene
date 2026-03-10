@@ -68,26 +68,65 @@ public final class FixedBitSet extends BitSet {
   private final int numBits; // The number of bits in use
   private final int numWords; // The exact number of longs needed to hold numBits (<= bits.length)
 
-  public interface Modifier extends Closeable {
-    default LongBuffer allocate(int numWords) {
-      return allocateBytes(numWords << 3).asLongBuffer();
+  public static final class ByteBufferStruct {
+    public final ByteBuffer buf;
+    public final MemorySegment m;
+
+    public ByteBufferStruct(ByteBuffer buf) {
+      this.buf = buf;
+      this.m = MemorySegment.ofBuffer(buf);
     }
-    default LongBuffer grow(LongBuffer arr, int minSize) {
+
+    public ByteBufferStruct(ByteBuffer buf, boolean withMemorySegment) {
+      this.buf = buf;
+      this.m = withMemorySegment ? MemorySegment.ofBuffer(buf) : null;
+    }
+
+    public LongBufferStruct asLongBufferStruct() {
+      return new LongBufferStruct(this);
+    }
+  }
+
+  public static final class LongBufferStruct {
+    public final LongBuffer buf;
+    public final MemorySegment m;
+
+    private LongBufferStruct(ByteBufferStruct buf) {
+      this.buf = buf.buf.asLongBuffer();
+      this.m = buf.m;
+    }
+
+    public LongBufferStruct(LongBuffer buf) {
+      this.buf = buf;
+      this.m = MemorySegment.ofBuffer(buf);
+    }
+
+    private LongBufferStruct(LongBuffer buf, MemorySegment m) {
+      this.buf = buf;
+      this.m = m;
+    }
+  }
+
+  public interface Modifier extends Closeable {
+    default LongBufferStruct allocate(int numWords) {
+      return allocateBytes(numWords << 3, true).asLongBufferStruct();
+    }
+    default LongBufferStruct grow(LongBufferStruct arr, int minSize) {
       assert minSize >= 0 : "size must be positive (got " + minSize + "): likely integer overflow?";
-      if (arr.remaining() < minSize) {
-        LongBuffer ret = allocate(ArrayUtil.oversize(minSize, Long.BYTES));
-        ret.put(arr);
-        ret.clear();
-        arr.flip(); // restore
-        return ret.clear();
+      if (arr.buf.remaining() < minSize) {
+        LongBufferStruct ret = allocate(ArrayUtil.oversize(minSize, Long.BYTES));
+        ret.buf.put(arr.buf);
+        ret.buf.clear();
+        arr.buf.flip(); // restore
+        return ret;
       } else {
         return arr;
       }
     }
-    default ByteBuffer allocateBytes(int size) {
-      return ByteBuffer.allocate(size).order(BYTE_ORDER);
+    default ByteBufferStruct allocateBytes(int size, boolean withMemorySegment) {
+      return new ByteBufferStruct(ByteBuffer.allocate(size).order(BYTE_ORDER), withMemorySegment);
     }
-    default ByteBuffer[] allocateBytesArr(int numBytes, Object sentinel) {
+    default ByteBufferStruct[] allocateBytesArr(int numBytes, Object sentinel, boolean withMemorySegment) {
       throw new UnsupportedOperationException();
     }
     default Modifier partitioned(int bitShift) {
@@ -96,12 +135,12 @@ public final class FixedBitSet extends BitSet {
       int byteMask = maxBytes - 1;
       return new Modifier() {
         @Override
-        public ByteBuffer[] allocateBytesArr(int numBytes, Object sentinel) {
+        public ByteBufferStruct[] allocateBytesArr(int numBytes, Object sentinel, boolean withMemorySegment) {
           int lastIdx = (numBytes - 1) >> byteShift;
-          ByteBuffer[] ret = new ByteBuffer[lastIdx + 1];
+          ByteBufferStruct[] ret = new ByteBufferStruct[lastIdx + 1];
           int len = ((numBytes - 1) & byteMask) + 1;
           for (int i = lastIdx; i >= 0; i--) {
-            ret[i] = allocateBytes(len);
+            ret[i] = allocateBytes(len, withMemorySegment);
             len = maxBytes;
           }
           return ret;
@@ -131,11 +170,11 @@ public final class FixedBitSet extends BitSet {
       // Depends on the ghost bits being clear!
       // (Otherwise, they may become visible in the new instance)
       int numWords = bits2words(numBits);
-      LongBuffer arr = bits.getBits();
-      if (numWords >= arr.remaining()) {
+      LongBufferStruct arr = new LongBufferStruct(bits.bits, bits.memorySegment);
+      if (numWords >= arr.buf.remaining()) {
         arr = DEFAULT_MODIFIER.grow(arr, numWords + 1);
       }
-      return new FixedBitSet(arr, arr.remaining() << 6);
+      return new FixedBitSet(arr, arr.buf.remaining() << 6);
     }
   }
 
@@ -261,8 +300,9 @@ public final class FixedBitSet extends BitSet {
 
   public FixedBitSet(int numBits, Modifier m) {
     this.numBits = numBits;
-    bits = m.allocate(bits2words(numBits));
-    memorySegment = MemorySegment.ofBuffer(bits);
+    LongBufferStruct lbs = m.allocate(bits2words(numBits));
+    bits = lbs.buf;
+    memorySegment = lbs.m;
     numWords = bits.remaining();
   }
 
@@ -274,7 +314,11 @@ public final class FixedBitSet extends BitSet {
    * @param storedBits the array to use as backing store
    * @param numBits the number of bits actually needed
    */
-  public FixedBitSet(LongBuffer storedBits, int numBits) {
+  public FixedBitSet(LongBufferStruct storedBits, int numBits) {
+    this(storedBits.buf, storedBits.m, numBits);
+  }
+
+  private FixedBitSet(LongBuffer storedBits, MemorySegment m, int numBits) {
     this.numWords = bits2words(numBits);
     if (numWords > storedBits.remaining()) {
       throw new IllegalArgumentException(
@@ -282,7 +326,7 @@ public final class FixedBitSet extends BitSet {
     }
     this.numBits = numBits;
     this.bits = storedBits;
-    this.memorySegment = MemorySegment.ofBuffer(bits);
+    this.memorySegment = m;
 
     assert verifyGhostBitsClear();
   }
@@ -769,10 +813,10 @@ public final class FixedBitSet extends BitSet {
     return clone(DEFAULT_MODIFIER.allocate(numWords));
   }
 
-  public FixedBitSet clone(LongBuffer bits) {
+  public FixedBitSet clone(LongBufferStruct bits) {
     LongBuffer template = this.bits.slice();
-    bits.put(template);
-    bits.clear();
+    bits.buf.put(template);
+    bits.buf.clear();
     return new FixedBitSet(bits, numBits);
   }
 
@@ -818,7 +862,7 @@ public final class FixedBitSet extends BitSet {
     if (bits instanceof FixedBits) {
       // restore the original FixedBitSet
       FixedBits fixedBits = (FixedBits) bits;
-      return new FixedBitSet(fixedBits.bits, fixedBits.length);
+      return new FixedBitSet(fixedBits.bits, fixedBits.m, fixedBits.length);
     } else if (bits instanceof FixedBitSet) {
       return (FixedBitSet) bits;
     } else {
@@ -835,7 +879,7 @@ public final class FixedBitSet extends BitSet {
     if (bits instanceof FixedBits) {
       // restore the original FixedBitSet
       FixedBits fixedBits = (FixedBits) bits;
-      bits = new FixedBitSet(fixedBits.bits, fixedBits.length);
+      bits = new FixedBitSet(fixedBits.bits, fixedBits.m, fixedBits.length);
     }
 
     if (bits instanceof FixedBitSet) {
@@ -895,6 +939,6 @@ public final class FixedBitSet extends BitSet {
    * FixedBitSet} will be reflected on the returned {@link Bits}.
    */
   public Bits asReadOnlyBits() {
-    return new FixedBits(bits, numBits);
+    return new FixedBits(bits, memorySegment, numBits);
   }
 }

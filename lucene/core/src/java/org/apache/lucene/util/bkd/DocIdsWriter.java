@@ -209,8 +209,8 @@ final class DocIdsWriter {
   private static DocIdSetIterator readBitSetIterator(IndexInput in, int count) throws IOException {
     int offsetWords = in.readVInt();
     int longLen = in.readVInt();
-    LongBuffer bits = FixedBitSet.DEFAULT_MODIFIER.allocate(longLen);
-    in.readLongs(bits, 0, longLen);
+    FixedBitSet.LongBufferStruct bits = FixedBitSet.DEFAULT_MODIFIER.allocate(longLen);
+    in.readLongs(bits.buf, 0, longLen);
     FixedBitSet bitSet = new FixedBitSet(bits, longLen << 6);
     return new DocBaseBitSetIterator(bitSet, count, offsetWords << 6);
   }

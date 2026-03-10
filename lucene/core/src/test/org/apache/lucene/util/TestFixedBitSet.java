@@ -69,6 +69,11 @@ public class TestFixedBitSet extends BaseBitSetTestCase<FixedBitSet> {
     long call(int reps, FixedBitSet one, FixedBitSet two) throws IOException;
   }
 
+  private static FixedBitSet.LongBufferStruct wrapAsLongBuffer(ByteBuffer bb) {
+    bb.order(FixedBitSet.BYTE_ORDER);
+    return new FixedBitSet.ByteBufferStruct(bb).asLongBufferStruct();
+  }
+
   private static void testVectorizedFBSPerf(int reps, PerfFunction func) throws IOException {
     if (Constants.IS_CLIENT_VM) {
       System.err.println("C2 compiler disabled; don't run FBSPerf test (run with `-Ptests.jvmargs='-XX:-TieredCompilation'`)");
@@ -84,8 +89,8 @@ public class TestFixedBitSet extends BaseBitSetTestCase<FixedBitSet> {
     // mess with alignment to test vectorization alignment
     int messupAlignment1 = r.nextInt(64); // 512 bits
     int messupAlignment2 = r.nextInt(64); // 512 bits
-    FixedBitSet data1 = new FixedBitSet(ByteBuffer.allocateDirect(numBytes + messupAlignment1).slice(messupAlignment1, numBytes).order(FixedBitSet.BYTE_ORDER).asLongBuffer(), size);
-    FixedBitSet data2 = new FixedBitSet(ByteBuffer.wrap(new byte[numBytes + messupAlignment2], messupAlignment2, numBytes).order(FixedBitSet.BYTE_ORDER).asLongBuffer(), size);
+    FixedBitSet data1 = new FixedBitSet(wrapAsLongBuffer(ByteBuffer.allocateDirect(numBytes + messupAlignment1).slice(messupAlignment1, numBytes)), size);
+    FixedBitSet data2 = new FixedBitSet(wrapAsLongBuffer(ByteBuffer.wrap(new byte[numBytes + messupAlignment2], messupAlignment2, numBytes)), size);
     for (int i = size - 1; i >= 0; i--) {
       if (r.nextBoolean()) {
         data1.set(i);
@@ -420,7 +425,9 @@ public class TestFixedBitSet extends BaseBitSetTestCase<FixedBitSet> {
     if (random().nextBoolean()) {
       int bits2words = FixedBitSet.bits2words(numBits);
       long[] words = new long[bits2words + random().nextInt(100)];
-      bs = new FixedBitSet(FixedBitSet.DEFAULT_MODIFIER.allocate(words.length).put(0, words), numBits);
+      FixedBitSet.LongBufferStruct lbs = FixedBitSet.DEFAULT_MODIFIER.allocate(words.length);
+      lbs.buf.put(0, words);
+      bs = new FixedBitSet(lbs, numBits);
     } else {
       bs = new FixedBitSet(numBits);
     }

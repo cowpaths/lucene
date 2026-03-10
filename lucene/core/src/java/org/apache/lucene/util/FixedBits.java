@@ -16,16 +16,20 @@
  */
 package org.apache.lucene.util;
 
+import java.lang.foreign.MemorySegment;
 import java.nio.LongBuffer;
 
 /** Immutable twin of FixedBitSet. */
+@SuppressWarnings("preview")
 final class FixedBits implements Bits {
 
   final LongBuffer bits;
+  final MemorySegment m;
   final int length;
 
-  FixedBits(LongBuffer bits, int length) {
+  FixedBits(LongBuffer bits, MemorySegment m, int length) {
     this.bits = bits;
+    this.m = m;
     this.length = length;
   }
 
