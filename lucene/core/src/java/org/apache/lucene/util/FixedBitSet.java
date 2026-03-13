@@ -74,12 +74,12 @@ public final class FixedBitSet extends BitSet {
 
     public ByteBufferStruct(ByteBuffer buf) {
       this.buf = buf;
-      this.m = MemorySegment.ofBuffer(buf);
+      this.m = buf.remaining() >= VECTOR_BYTE_SIZE ? MemorySegment.ofBuffer(buf) : null;
     }
 
     public ByteBufferStruct(ByteBuffer buf, boolean withMemorySegment) {
       this.buf = buf;
-      this.m = withMemorySegment ? MemorySegment.ofBuffer(buf) : null;
+      this.m = (withMemorySegment && buf.remaining() >= VECTOR_BYTE_SIZE) ? MemorySegment.ofBuffer(buf) : null;
     }
 
     public LongBufferStruct asLongBufferStruct() {
@@ -187,6 +187,7 @@ public final class FixedBitSet extends BitSet {
 
   private static final VectorSpecies<Long> S = LongVector.SPECIES_PREFERRED;
   private static final int INC = S.length();
+  private static final int VECTOR_BYTE_SIZE = S.vectorByteSize();
 
   /**
    * Returns the popcount or cardinality of the intersection of the two sets. Neither set is
