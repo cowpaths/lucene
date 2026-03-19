@@ -16,12 +16,17 @@
  */
 package org.apache.lucene.internal.vectorization;
 
-import java.lang.foreign.MemorySegment;
+import java.nio.Buffer;
 import java.nio.LongBuffer;
 
 /**
  * Provider of vectorized implementations of bit-set operations for {@link
  * org.apache.lucene.util.FixedBitSet}.
+ *
+ * <p>The {@code ms} parameters are {@code MemorySegment} instances (from {@code
+ * java.lang.foreign}) held as {@code Object} to avoid a compile-time dependency on that API in
+ * base (JDK 11) source. Panama implementations cast them internally; the scalar implementation
+ * ignores them.
  *
  * @lucene.internal
  */
@@ -31,93 +36,75 @@ public abstract class FixedBitSetSupport {
 
   /**
    * Returns the preferred vector byte size for this provider, or 0 if vectorization is not
-   * available. Used to decide whether to wrap buffers with {@link MemorySegment}.
+   * available. Used to decide whether to wrap buffers with a {@code MemorySegment}.
    */
   public abstract int vectorByteSize();
 
+  /**
+   * Wraps a {@link Buffer} in a {@code MemorySegment}, or returns {@code null} if vectorization
+   * is not available.
+   */
+  public abstract Object wrapBuffer(Buffer buf);
+
   /** Popcount of {@code numWords} longs in {@code bits} starting at {@code fromWord}. */
-  public abstract long popCount(MemorySegment ms, LongBuffer bits, int fromWord, int numWords);
+  public abstract long popCount(Object ms, LongBuffer bits, int fromWord, int numWords);
 
   /** Popcount of {@code (aBits[i] & bBits[i])} for {@code i} in {@code [0, numCommonWords)}. */
   public abstract long intersectionPopCount(
-      MemorySegment aMs,
-      LongBuffer aBits,
-      MemorySegment bMs,
-      LongBuffer bBits,
-      int numCommonWords);
+      Object aMs, LongBuffer aBits, Object bMs, LongBuffer bBits, int numCommonWords);
 
   /**
    * Popcount of the union of {@code aBits[0..aNumWords)} and {@code bBits[0..bNumWords)},
    * equivalent to {@code popcount(a | b)} but without materializing the union.
    */
   public abstract long unionPopCount(
-      MemorySegment aMs,
-      LongBuffer aBits,
-      int aNumWords,
-      MemorySegment bMs,
-      LongBuffer bBits,
-      int bNumWords);
+      Object aMs, LongBuffer aBits, int aNumWords, Object bMs, LongBuffer bBits, int bNumWords);
 
   /**
    * Popcount of {@code (aBits[i] & ~bBits[i])} for common words, plus popcount of remaining
    * {@code aBits} words beyond the common prefix.
    */
   public abstract long andNotPopCount(
-      MemorySegment aMs,
-      LongBuffer aBits,
-      int aNumWords,
-      MemorySegment bMs,
-      LongBuffer bBits,
-      int bNumWords);
+      Object aMs, LongBuffer aBits, int aNumWords, Object bMs, LongBuffer bBits, int bNumWords);
 
   /**
    * In-place OR: {@code thisBits[otherOffsetWords + i] |= otherBits[i]} for {@code i} in {@code
    * [0, len)}.
    */
   public abstract void or(
-      MemorySegment thisMs,
+      Object thisMs,
       LongBuffer thisBits,
       int otherOffsetWords,
-      MemorySegment otherMs,
+      Object otherMs,
       LongBuffer otherBits,
       int len);
 
   /** In-place XOR: {@code thisBits[i] ^= otherBits[i]} for {@code i} in {@code [0, len)}. */
   public abstract void xor(
-      MemorySegment thisMs,
-      LongBuffer thisBits,
-      MemorySegment otherMs,
-      LongBuffer otherBits,
-      int len);
+      Object thisMs, LongBuffer thisBits, Object otherMs, LongBuffer otherBits, int len);
 
   /** In-place AND: {@code thisBits[i] &= otherBits[i]} for {@code i} in {@code [0, len)}. */
   public abstract void and(
-      MemorySegment thisMs,
-      LongBuffer thisBits,
-      MemorySegment otherMs,
-      LongBuffer otherBits,
-      int len);
+      Object thisMs, LongBuffer thisBits, Object otherMs, LongBuffer otherBits, int len);
 
   /**
    * In-place AND-NOT: {@code thisBits[otherOffsetWords + i] &= ~otherBits[i]} for {@code i} in
    * {@code [0, len)}.
    */
   public abstract void andNot(
-      MemorySegment thisMs,
+      Object thisMs,
       LongBuffer thisBits,
       int otherOffsetWords,
-      MemorySegment otherMs,
+      Object otherMs,
       LongBuffer otherBits,
       int len);
 
   /** NOT in-place: {@code bits[i] = ~bits[i]} for {@code i} in {@code [fromWord, toWord)}. */
-  public abstract void flipWords(
-      MemorySegment ms, LongBuffer bits, int fromWord, int toWord);
+  public abstract void flipWords(Object ms, LongBuffer bits, int fromWord, int toWord);
 
   /**
    * Fill: {@code bits[i] = val} for {@code i} in {@code [startWord, endWord)}. {@code val} must
    * be {@code 0L} or {@code -1L}.
    */
-  public abstract void fill(
-      MemorySegment ms, LongBuffer bits, int startWord, int endWord, long val);
+  public abstract void fill(Object ms, LongBuffer bits, int startWord, int endWord, long val);
 }

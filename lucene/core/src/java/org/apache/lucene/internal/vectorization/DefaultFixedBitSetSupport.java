@@ -16,7 +16,7 @@
  */
 package org.apache.lucene.internal.vectorization;
 
-import java.lang.foreign.MemorySegment;
+import java.nio.Buffer;
 import java.nio.LongBuffer;
 
 /** Scalar (non-vectorized) implementation of {@link FixedBitSetSupport}. */
@@ -30,7 +30,12 @@ final class DefaultFixedBitSetSupport extends FixedBitSetSupport {
   }
 
   @Override
-  public long popCount(MemorySegment ms, LongBuffer bits, int fromWord, int numWords) {
+  public Object wrapBuffer(Buffer buf) {
+    return null;
+  }
+
+  @Override
+  public long popCount(Object ms, LongBuffer bits, int fromWord, int numWords) {
     long tot = 0;
     for (int i = fromWord, lim = fromWord + numWords; i < lim; i++) {
       tot += Long.bitCount(bits.get(i));
@@ -40,11 +45,7 @@ final class DefaultFixedBitSetSupport extends FixedBitSetSupport {
 
   @Override
   public long intersectionPopCount(
-      MemorySegment aMs,
-      LongBuffer aBits,
-      MemorySegment bMs,
-      LongBuffer bBits,
-      int numCommonWords) {
+      Object aMs, LongBuffer aBits, Object bMs, LongBuffer bBits, int numCommonWords) {
     long tot = 0;
     for (int i = 0; i < numCommonWords; i++) {
       tot += Long.bitCount(aBits.get(i) & bBits.get(i));
@@ -54,12 +55,7 @@ final class DefaultFixedBitSetSupport extends FixedBitSetSupport {
 
   @Override
   public long unionPopCount(
-      MemorySegment aMs,
-      LongBuffer aBits,
-      int aNumWords,
-      MemorySegment bMs,
-      LongBuffer bBits,
-      int bNumWords) {
+      Object aMs, LongBuffer aBits, int aNumWords, Object bMs, LongBuffer bBits, int bNumWords) {
     int numCommonWords = Math.min(aNumWords, bNumWords);
     long tot = 0;
     for (int i = 0; i < numCommonWords; i++) {
@@ -76,12 +72,7 @@ final class DefaultFixedBitSetSupport extends FixedBitSetSupport {
 
   @Override
   public long andNotPopCount(
-      MemorySegment aMs,
-      LongBuffer aBits,
-      int aNumWords,
-      MemorySegment bMs,
-      LongBuffer bBits,
-      int bNumWords) {
+      Object aMs, LongBuffer aBits, int aNumWords, Object bMs, LongBuffer bBits, int bNumWords) {
     int numCommonWords = Math.min(aNumWords, bNumWords);
     long tot = 0;
     for (int i = 0; i < numCommonWords; i++) {
@@ -95,10 +86,10 @@ final class DefaultFixedBitSetSupport extends FixedBitSetSupport {
 
   @Override
   public void or(
-      MemorySegment thisMs,
+      Object thisMs,
       LongBuffer thisBits,
       int otherOffsetWords,
-      MemorySegment otherMs,
+      Object otherMs,
       LongBuffer otherBits,
       int len) {
     for (int i = 0; i < len; i++) {
@@ -109,11 +100,7 @@ final class DefaultFixedBitSetSupport extends FixedBitSetSupport {
 
   @Override
   public void xor(
-      MemorySegment thisMs,
-      LongBuffer thisBits,
-      MemorySegment otherMs,
-      LongBuffer otherBits,
-      int len) {
+      Object thisMs, LongBuffer thisBits, Object otherMs, LongBuffer otherBits, int len) {
     for (int i = 0; i < len; i++) {
       thisBits.put(i, thisBits.get(i) ^ otherBits.get(i));
     }
@@ -121,11 +108,7 @@ final class DefaultFixedBitSetSupport extends FixedBitSetSupport {
 
   @Override
   public void and(
-      MemorySegment thisMs,
-      LongBuffer thisBits,
-      MemorySegment otherMs,
-      LongBuffer otherBits,
-      int len) {
+      Object thisMs, LongBuffer thisBits, Object otherMs, LongBuffer otherBits, int len) {
     for (int i = 0; i < len; i++) {
       thisBits.put(i, thisBits.get(i) & otherBits.get(i));
     }
@@ -133,10 +116,10 @@ final class DefaultFixedBitSetSupport extends FixedBitSetSupport {
 
   @Override
   public void andNot(
-      MemorySegment thisMs,
+      Object thisMs,
       LongBuffer thisBits,
       int otherOffsetWords,
-      MemorySegment otherMs,
+      Object otherMs,
       LongBuffer otherBits,
       int len) {
     for (int i = 0; i < len; i++) {
@@ -146,14 +129,14 @@ final class DefaultFixedBitSetSupport extends FixedBitSetSupport {
   }
 
   @Override
-  public void flipWords(MemorySegment ms, LongBuffer bits, int fromWord, int toWord) {
+  public void flipWords(Object ms, LongBuffer bits, int fromWord, int toWord) {
     for (int i = fromWord; i < toWord; i++) {
       bits.put(i, ~bits.get(i));
     }
   }
 
   @Override
-  public void fill(MemorySegment ms, LongBuffer bits, int startWord, int endWord, long val) {
+  public void fill(Object ms, LongBuffer bits, int startWord, int endWord, long val) {
     for (int i = startWord; i < endWord; i++) {
       bits.put(i, val);
     }

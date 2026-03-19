@@ -17,6 +17,7 @@
 package org.apache.lucene.internal.vectorization;
 
 import java.lang.foreign.MemorySegment;
+import java.nio.Buffer;
 import java.nio.ByteOrder;
 import java.nio.LongBuffer;
 import jdk.incubator.vector.LongVector;
@@ -24,6 +25,7 @@ import jdk.incubator.vector.VectorOperators;
 import jdk.incubator.vector.VectorSpecies;
 
 /** Panama Vector API implementation of {@link FixedBitSetSupport}. */
+@SuppressWarnings("preview")
 final class PanamaFixedBitSetSupport extends FixedBitSetSupport {
 
   private static final VectorSpecies<Long> S = LongVector.SPECIES_PREFERRED;
@@ -37,7 +39,13 @@ final class PanamaFixedBitSetSupport extends FixedBitSetSupport {
   }
 
   @Override
-  public long popCount(MemorySegment ms, LongBuffer bits, int fromWord, int numWords) {
+  public Object wrapBuffer(Buffer buf) {
+    return MemorySegment.ofBuffer(buf);
+  }
+
+  @Override
+  public long popCount(Object msObj, LongBuffer bits, int fromWord, int numWords) {
+    MemorySegment ms = (MemorySegment) msObj;
     long tot = 0;
     int i = 0;
     for (int lim = S.loopBound(numWords); i < lim; i += INC) {
@@ -53,19 +61,16 @@ final class PanamaFixedBitSetSupport extends FixedBitSetSupport {
 
   @Override
   public long intersectionPopCount(
-      MemorySegment aMs,
-      LongBuffer aBits,
-      MemorySegment bMs,
-      LongBuffer bBits,
-      int numCommonWords) {
+      Object aMsObj, LongBuffer aBits, Object bMsObj, LongBuffer bBits, int numCommonWords) {
+    MemorySegment aMs = (MemorySegment) aMsObj;
+    MemorySegment bMs = (MemorySegment) bMsObj;
     long tot = 0;
     int i = 0;
     for (int lim = S.loopBound(numCommonWords); i < lim; i += INC) {
       long off = (long) i << 3;
       LongVector vA = LongVector.fromMemorySegment(S, aMs, off, NATIVE_ORDER);
       LongVector vB = LongVector.fromMemorySegment(S, bMs, off, NATIVE_ORDER);
-      tot +=
-          vA.and(vB).lanewise(VectorOperators.BIT_COUNT).reduceLanes(VectorOperators.ADD);
+      tot += vA.and(vB).lanewise(VectorOperators.BIT_COUNT).reduceLanes(VectorOperators.ADD);
     }
     for (; i < numCommonWords; i++) {
       tot += Long.bitCount(aBits.get(i) & bBits.get(i));
@@ -75,12 +80,14 @@ final class PanamaFixedBitSetSupport extends FixedBitSetSupport {
 
   @Override
   public long unionPopCount(
-      MemorySegment aMs,
+      Object aMsObj,
       LongBuffer aBits,
       int aNumWords,
-      MemorySegment bMs,
+      Object bMsObj,
       LongBuffer bBits,
       int bNumWords) {
+    MemorySegment aMs = (MemorySegment) aMsObj;
+    MemorySegment bMs = (MemorySegment) bMsObj;
     long tot = 0;
     final int numCommonWords = Math.min(aNumWords, bNumWords);
     int i = 0;
@@ -88,8 +95,7 @@ final class PanamaFixedBitSetSupport extends FixedBitSetSupport {
       long off = (long) i << 3;
       LongVector vA = LongVector.fromMemorySegment(S, aMs, off, NATIVE_ORDER);
       LongVector vB = LongVector.fromMemorySegment(S, bMs, off, NATIVE_ORDER);
-      tot +=
-          vA.or(vB).lanewise(VectorOperators.BIT_COUNT).reduceLanes(VectorOperators.ADD);
+      tot += vA.or(vB).lanewise(VectorOperators.BIT_COUNT).reduceLanes(VectorOperators.ADD);
     }
     int alignedLim;
     if (i == numCommonWords) {
@@ -126,12 +132,14 @@ final class PanamaFixedBitSetSupport extends FixedBitSetSupport {
 
   @Override
   public long andNotPopCount(
-      MemorySegment aMs,
+      Object aMsObj,
       LongBuffer aBits,
       int aNumWords,
-      MemorySegment bMs,
+      Object bMsObj,
       LongBuffer bBits,
       int bNumWords) {
+    MemorySegment aMs = (MemorySegment) aMsObj;
+    MemorySegment bMs = (MemorySegment) bMsObj;
     long tot = 0;
     final int numCommonWords = Math.min(aNumWords, bNumWords);
     int i = 0;
@@ -165,12 +173,14 @@ final class PanamaFixedBitSetSupport extends FixedBitSetSupport {
 
   @Override
   public void or(
-      MemorySegment thisMs,
+      Object thisMsObj,
       LongBuffer thisBits,
       int otherOffsetWords,
-      MemorySegment otherMs,
+      Object otherMsObj,
       LongBuffer otherBits,
       int len) {
+    MemorySegment thisMs = (MemorySegment) thisMsObj;
+    MemorySegment otherMs = (MemorySegment) otherMsObj;
     int i = 0;
     for (int lim = S.loopBound(len); i < lim; i += INC) {
       long thisOff = (long) (i + otherOffsetWords) << 3;
@@ -187,11 +197,9 @@ final class PanamaFixedBitSetSupport extends FixedBitSetSupport {
 
   @Override
   public void xor(
-      MemorySegment thisMs,
-      LongBuffer thisBits,
-      MemorySegment otherMs,
-      LongBuffer otherBits,
-      int len) {
+      Object thisMsObj, LongBuffer thisBits, Object otherMsObj, LongBuffer otherBits, int len) {
+    MemorySegment thisMs = (MemorySegment) thisMsObj;
+    MemorySegment otherMs = (MemorySegment) otherMsObj;
     int i = 0;
     for (int lim = S.loopBound(len); i < lim; i += INC) {
       long off = (long) i << 3;
@@ -206,11 +214,9 @@ final class PanamaFixedBitSetSupport extends FixedBitSetSupport {
 
   @Override
   public void and(
-      MemorySegment thisMs,
-      LongBuffer thisBits,
-      MemorySegment otherMs,
-      LongBuffer otherBits,
-      int len) {
+      Object thisMsObj, LongBuffer thisBits, Object otherMsObj, LongBuffer otherBits, int len) {
+    MemorySegment thisMs = (MemorySegment) thisMsObj;
+    MemorySegment otherMs = (MemorySegment) otherMsObj;
     int i = 0;
     for (int lim = S.loopBound(len); i < lim; i += INC) {
       long off = (long) i << 3;
@@ -225,12 +231,14 @@ final class PanamaFixedBitSetSupport extends FixedBitSetSupport {
 
   @Override
   public void andNot(
-      MemorySegment thisMs,
+      Object thisMsObj,
       LongBuffer thisBits,
       int otherOffsetWords,
-      MemorySegment otherMs,
+      Object otherMsObj,
       LongBuffer otherBits,
       int len) {
+    MemorySegment thisMs = (MemorySegment) thisMsObj;
+    MemorySegment otherMs = (MemorySegment) otherMsObj;
     int i = 0;
     for (int lim = S.loopBound(len); i < lim; i += INC) {
       long thisOff = (long) (i + otherOffsetWords) << 3;
@@ -248,7 +256,8 @@ final class PanamaFixedBitSetSupport extends FixedBitSetSupport {
   }
 
   @Override
-  public void flipWords(MemorySegment ms, LongBuffer bits, int fromWord, int toWord) {
+  public void flipWords(Object msObj, LongBuffer bits, int fromWord, int toWord) {
+    MemorySegment ms = (MemorySegment) msObj;
     int len = toWord - fromWord;
     int i = fromWord;
     for (int lim = fromWord + S.loopBound(len); i < lim; i += INC) {
@@ -262,7 +271,8 @@ final class PanamaFixedBitSetSupport extends FixedBitSetSupport {
   }
 
   @Override
-  public void fill(MemorySegment ms, LongBuffer bits, int startWord, int endWord, long val) {
+  public void fill(Object msObj, LongBuffer bits, int startWord, int endWord, long val) {
+    MemorySegment ms = (MemorySegment) msObj;
     assert val == 0 || val == -1L; // otherwise ByteOrder matters
     int len = endWord - startWord;
     int i = startWord;

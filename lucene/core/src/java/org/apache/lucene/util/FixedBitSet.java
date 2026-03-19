@@ -22,7 +22,6 @@ import org.apache.lucene.search.DocIdSet;
 import org.apache.lucene.search.DocIdSetIterator;
 import java.io.Closeable;
 import java.io.IOException;
-import java.lang.foreign.MemorySegment;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.LongBuffer;
@@ -34,7 +33,6 @@ import java.nio.LongBuffer;
  *
  * @lucene.internal
  */
-@SuppressWarnings("preview")
 public final class FixedBitSet extends BitSet {
 
   private static final long BASE_RAM_BYTES_USED =
@@ -69,24 +67,24 @@ public final class FixedBitSet extends BitSet {
   }
 
   private final LongBuffer bits; // Array of longs holding the bits
-  private final MemorySegment memorySegment;
+  private final Object memorySegment;
   private final int numBits; // The number of bits in use
   private final int numWords; // The exact number of longs needed to hold numBits (<= bits.length)
 
   public static final class ByteBufferStruct {
     public final ByteBuffer buf;
-    public final MemorySegment m;
+    public final Object m;
 
     public ByteBufferStruct(ByteBuffer buf) {
       this.buf = buf;
       this.m = (VECTOR_BYTE_SIZE > 0 && buf.remaining() >= VECTOR_BYTE_SIZE)
-          ? MemorySegment.ofBuffer(buf) : null;
+          ? SUPPORT.wrapBuffer(buf) : null;
     }
 
     public ByteBufferStruct(ByteBuffer buf, boolean withMemorySegment) {
       this.buf = buf;
       this.m = (withMemorySegment && VECTOR_BYTE_SIZE > 0 && buf.remaining() >= VECTOR_BYTE_SIZE)
-          ? MemorySegment.ofBuffer(buf) : null;
+          ? SUPPORT.wrapBuffer(buf) : null;
     }
 
     public LongBufferStruct asLongBufferStruct() {
@@ -96,7 +94,7 @@ public final class FixedBitSet extends BitSet {
 
   public static final class LongBufferStruct {
     public final LongBuffer buf;
-    public final MemorySegment m;
+    public final Object m;
 
     private LongBufferStruct(ByteBufferStruct buf) {
       this.buf = buf.buf.asLongBuffer();
@@ -105,10 +103,10 @@ public final class FixedBitSet extends BitSet {
 
     public LongBufferStruct(LongBuffer buf) {
       this.buf = buf;
-      this.m = VECTOR_BYTE_SIZE > 0 ? MemorySegment.ofBuffer(buf) : null;
+      this.m = VECTOR_BYTE_SIZE > 0 ? SUPPORT.wrapBuffer(buf) : null;
     }
 
-    private LongBufferStruct(LongBuffer buf, MemorySegment m) {
+    private LongBufferStruct(LongBuffer buf, Object m) {
       this.buf = buf;
       this.m = m;
     }
@@ -253,7 +251,7 @@ public final class FixedBitSet extends BitSet {
     this(storedBits.buf, storedBits.m, numBits);
   }
 
-  private FixedBitSet(LongBuffer storedBits, MemorySegment m, int numBits) {
+  private FixedBitSet(LongBuffer storedBits, Object m, int numBits) {
     this.numWords = bits2words(numBits);
     if (numWords > storedBits.remaining()) {
       throw new IllegalArgumentException(
