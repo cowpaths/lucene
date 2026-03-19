@@ -16,9 +16,8 @@
  */
 package org.apache.lucene.util;
 
-import jdk.incubator.vector.LongVector;
-import jdk.incubator.vector.VectorOperators;
-import jdk.incubator.vector.VectorSpecies;
+import org.apache.lucene.internal.vectorization.FixedBitSetSupport;
+import org.apache.lucene.internal.vectorization.VectorizationProvider;
 import org.apache.lucene.search.DocIdSet;
 import org.apache.lucene.search.DocIdSetIterator;
 import java.io.Closeable;
@@ -41,6 +40,14 @@ public final class FixedBitSet extends BitSet {
   private static final long BASE_RAM_BYTES_USED =
       RamUsageEstimator.shallowSizeOfInstance(FixedBitSet.class);
 
+  static final FixedBitSetSupport SUPPORT;
+  public static final int VECTOR_BYTE_SIZE;
+
+  static {
+    SUPPORT = VectorizationProvider.getInstance().getFixedBitSetSupport();
+    VECTOR_BYTE_SIZE = SUPPORT.vectorByteSize();
+  }
+
   public static final ByteOrder BYTE_ORDER;
 
   static {
@@ -61,8 +68,6 @@ public final class FixedBitSet extends BitSet {
     }
   }
 
-  private static final ByteOrder NATIVE_ORDER = ByteOrder.nativeOrder();
-
   private final LongBuffer bits; // Array of longs holding the bits
   private final MemorySegment memorySegment;
   private final int numBits; // The number of bits in use
@@ -74,12 +79,14 @@ public final class FixedBitSet extends BitSet {
 
     public ByteBufferStruct(ByteBuffer buf) {
       this.buf = buf;
-      this.m = buf.remaining() >= VECTOR_BYTE_SIZE ? MemorySegment.ofBuffer(buf) : null;
+      this.m = (VECTOR_BYTE_SIZE > 0 && buf.remaining() >= VECTOR_BYTE_SIZE)
+          ? MemorySegment.ofBuffer(buf) : null;
     }
 
     public ByteBufferStruct(ByteBuffer buf, boolean withMemorySegment) {
       this.buf = buf;
-      this.m = (withMemorySegment && buf.remaining() >= VECTOR_BYTE_SIZE) ? MemorySegment.ofBuffer(buf) : null;
+      this.m = (withMemorySegment && VECTOR_BYTE_SIZE > 0 && buf.remaining() >= VECTOR_BYTE_SIZE)
+          ? MemorySegment.ofBuffer(buf) : null;
     }
 
     public LongBufferStruct asLongBufferStruct() {
@@ -98,7 +105,7 @@ public final class FixedBitSet extends BitSet {
 
     public LongBufferStruct(LongBuffer buf) {
       this.buf = buf;
-      this.m = MemorySegment.ofBuffer(buf);
+      this.m = VECTOR_BYTE_SIZE > 0 ? MemorySegment.ofBuffer(buf) : null;
     }
 
     private LongBufferStruct(LongBuffer buf, MemorySegment m) {
@@ -185,74 +192,24 @@ public final class FixedBitSet extends BitSet {
     return ((numBits - 1) >> 6) + 1;
   }
 
-  private static final VectorSpecies<Long> S = LongVector.SPECIES_PREFERRED;
-  private static final int INC = S.length();
-  private static final int VECTOR_BYTE_SIZE = S.vectorByteSize();
-
   /**
    * Returns the popcount or cardinality of the intersection of the two sets. Neither set is
    * modified.
    */
   public static long intersectionCount(FixedBitSet a, FixedBitSet b) {
     // Depends on the ghost bits being clear!
-    long tot = 0;
-    final int numCommonWords = Math.min(a.numWords, b.numWords);
-    int i = 0;
-    for (int lim = S.loopBound(numCommonWords); i < lim; i += INC) {
-      long off = (long) i << 3;
-      LongVector vA = LongVector.fromMemorySegment(S, a.memorySegment, off, NATIVE_ORDER);
-      LongVector vB = LongVector.fromMemorySegment(S, b.memorySegment, off, NATIVE_ORDER);
-      tot += vA.and(vB).lanewise(VectorOperators.BIT_COUNT).reduceLanes(VectorOperators.ADD);
-    }
-    for (; i < numCommonWords; ++i) {
-      tot += Long.bitCount(a.bits.get(i) & b.bits.get(i));
-    }
-    return tot;
+    return SUPPORT.intersectionPopCount(
+        a.memorySegment, a.bits,
+        b.memorySegment, b.bits,
+        Math.min(a.numWords, b.numWords));
   }
 
   /** Returns the popcount or cardinality of the union of the two sets. Neither set is modified. */
   public static long unionCount(FixedBitSet a, FixedBitSet b) {
     // Depends on the ghost bits being clear!
-    long tot = 0;
-    final int numCommonWords = Math.min(a.numWords, b.numWords);
-    int i = 0;
-    for (int lim = S.loopBound(numCommonWords); i < lim; i += INC) {
-      long off = (long) i << 3;
-      LongVector vA = LongVector.fromMemorySegment(S, a.memorySegment, off, NATIVE_ORDER);
-      LongVector vB = LongVector.fromMemorySegment(S, b.memorySegment, off, NATIVE_ORDER);
-      tot += vA.or(vB).lanewise(VectorOperators.BIT_COUNT).reduceLanes(VectorOperators.ADD);
-    }
-    int alignedLim;
-    if (i == numCommonWords) {
-      alignedLim = i;
-    } else {
-      alignedLim = i + INC;
-      do {
-        tot += Long.bitCount(a.bits.get(i) | b.bits.get(i));
-      } while (++i < numCommonWords);
-      for (int lim = Math.min(a.numWords, alignedLim); i < lim; ++i) {
-        tot += Long.bitCount(a.bits.get(i));
-      }
-      for (int j = numCommonWords, lim = Math.min(b.numWords, alignedLim); j < lim; ++j) {
-        tot += Long.bitCount(b.bits.get(j));
-      }
-    }
-    for (int lim = S.loopBound(a.numWords); i < lim; i += INC) {
-      LongVector v = LongVector.fromMemorySegment(S, a.memorySegment, (long) i << 3, NATIVE_ORDER);
-      tot += v.lanewise(VectorOperators.BIT_COUNT).reduceLanes(VectorOperators.ADD);
-    }
-    int j = alignedLim;
-    for (int lim = S.loopBound(b.numWords); j < lim; j += INC) {
-      LongVector v = LongVector.fromMemorySegment(S, b.memorySegment, (long) j << 3, NATIVE_ORDER);
-      tot += v.lanewise(VectorOperators.BIT_COUNT).reduceLanes(VectorOperators.ADD);
-    }
-    for (; i < a.numWords; ++i) {
-      tot += Long.bitCount(a.bits.get(i));
-    }
-    for (; j < b.numWords; ++j) {
-      tot += Long.bitCount(b.bits.get(j));
-    }
-    return tot;
+    return SUPPORT.unionPopCount(
+        a.memorySegment, a.bits, a.numWords,
+        b.memorySegment, b.bits, b.numWords);
   }
 
   /**
@@ -261,32 +218,9 @@ public final class FixedBitSet extends BitSet {
    */
   public static long andNotCount(FixedBitSet a, FixedBitSet b) {
     // Depends on the ghost bits being clear!
-    long tot = 0;
-    final int numCommonWords = Math.min(a.numWords, b.numWords);
-    int i = 0;
-    for (int lim = S.loopBound(numCommonWords); i < lim; i += INC) {
-      long off = (long) i << 3;
-      LongVector vA = LongVector.fromMemorySegment(S, a.memorySegment, off, NATIVE_ORDER);
-      LongVector vB = LongVector.fromMemorySegment(S, b.memorySegment, off, NATIVE_ORDER);
-      tot += vA.lanewise(VectorOperators.AND_NOT, vB).lanewise(VectorOperators.BIT_COUNT).reduceLanes(VectorOperators.ADD);
-    }
-    if (i < numCommonWords) {
-      int alignedLim = i + INC;
-      for (; i < numCommonWords; ++i) {
-        tot += Long.bitCount(a.bits.get(i) & ~b.bits.get(i));
-      }
-      for (int lim = Math.min(a.numWords, alignedLim); i < lim; ++i) {
-        tot += Long.bitCount(a.bits.get(i));
-      }
-    }
-    for (int lim = S.loopBound(a.numWords); i < lim; i += INC) {
-      LongVector v = LongVector.fromMemorySegment(S, a.memorySegment, (long) i << 3, NATIVE_ORDER);
-      tot += v.lanewise(VectorOperators.BIT_COUNT).reduceLanes(VectorOperators.ADD);
-    }
-    for (; i < a.numWords; ++i) {
-      tot += Long.bitCount(a.bits.get(i));
-    }
-    return tot;
+    return SUPPORT.andNotPopCount(
+        a.memorySegment, a.bits, a.numWords,
+        b.memorySegment, b.bits, b.numWords);
   }
 
   /**
@@ -380,16 +314,7 @@ public final class FixedBitSet extends BitSet {
   @Override
   public int cardinality() {
     // Depends on the ghost bits being clear!
-    long tot = 0;
-    int i = 0;
-    for (int lim = S.loopBound(numWords); i < lim; i += INC) {
-      LongVector v = LongVector.fromMemorySegment(S, memorySegment, (long) i << 3, NATIVE_ORDER);
-      tot += v.lanewise(VectorOperators.BIT_COUNT).reduceLanes(VectorOperators.ADD);
-    }
-    for (; i < numWords; ++i) {
-      tot += Long.bitCount(bits.get(i));
-    }
-    return Math.toIntExact(tot);
+    return Math.toIntExact(SUPPORT.popCount(memorySegment, bits, 0, numWords));
   }
 
   @Override
@@ -409,14 +334,7 @@ public final class FixedBitSet extends BitSet {
     long popCount = 0;
     int maxWord;
     for (maxWord = 0; maxWord + interval < numWords; maxWord += interval) {
-      int i = 0;
-      for (int lim = S.loopBound(rangeLength); i < lim; i += INC) {
-        LongVector v = LongVector.fromMemorySegment(S, memorySegment, (long) (maxWord + i) << 3, NATIVE_ORDER);
-        popCount += v.lanewise(VectorOperators.BIT_COUNT).reduceLanes(VectorOperators.ADD);
-      }
-      for (; i < rangeLength; ++i) {
-        popCount += Long.bitCount(bits.get(maxWord + i));
-      }
+      popCount += SUPPORT.popCount(memorySegment, bits, maxWord, rangeLength);
     }
 
     popCount *= (interval / rangeLength) * numWords / maxWord;
@@ -531,23 +449,10 @@ public final class FixedBitSet extends BitSet {
   }
 
   private void or(final int otherOffsetWords, FixedBitSet other) {
-    final int otherNumWords = other.numWords;
-    final LongBuffer otherArr = other.bits;
-    assert otherNumWords + otherOffsetWords <= numWords
-        : "numWords=" + numWords + ", otherNumWords=" + otherNumWords;
-    int len = Math.min(numWords - otherOffsetWords, otherNumWords);
-    int i = 0;
-    for (int lim = S.loopBound(len); i < lim; i += INC) {
-      long thisOff = (long) (i + otherOffsetWords) << 3;
-      long otherOff = (long) i << 3;
-      LongVector vThis = LongVector.fromMemorySegment(S, this.memorySegment, thisOff, NATIVE_ORDER);
-      LongVector vOther = LongVector.fromMemorySegment(S, other.memorySegment, otherOff, NATIVE_ORDER);
-      vThis.or(vOther).intoMemorySegment(this.memorySegment, thisOff, NATIVE_ORDER);
-    }
-    for (; i < len; ++i) {
-      int off = i + otherOffsetWords;
-      this.bits.put(off, this.bits.get(off) | otherArr.get(i));
-    }
+    assert other.numWords + otherOffsetWords <= numWords
+        : "numWords=" + numWords + ", otherNumWords=" + other.numWords;
+    int len = Math.min(numWords - otherOffsetWords, other.numWords);
+    SUPPORT.or(memorySegment, bits, otherOffsetWords, other.memorySegment, other.bits, len);
   }
 
   /** Does in-place XOR of the bits provided by the iterator. */
@@ -566,20 +471,9 @@ public final class FixedBitSet extends BitSet {
 
   /** this = this XOR other */
   public void xor(FixedBitSet other) {
-    final int otherNumWords = other.numWords;
-    final LongBuffer otherBits = other.bits;
-    assert otherNumWords <= numWords : "numWords=" + numWords + ", other.numWords=" + otherNumWords;
-    int len = Math.min(numWords, otherNumWords);
-    int i = 0;
-    for (int lim = S.loopBound(len); i < lim; i += INC) {
-      long off = (long) i << 3;
-      LongVector vThis = LongVector.fromMemorySegment(S, this.memorySegment, off, NATIVE_ORDER);
-      LongVector vOther = LongVector.fromMemorySegment(S, other.memorySegment, off, NATIVE_ORDER);
-      vThis.lanewise(VectorOperators.XOR, vOther).intoMemorySegment(this.memorySegment, off, NATIVE_ORDER);
-    }
-    for (; i < len; ++i) {
-      this.bits.put(i, this.bits.get(i) ^ otherBits.get(i));
-    }
+    assert other.numWords <= numWords : "numWords=" + numWords + ", other.numWords=" + other.numWords;
+    int len = Math.min(numWords, other.numWords);
+    SUPPORT.xor(memorySegment, bits, other.memorySegment, other.bits, len);
   }
 
   /** returns true if the sets have any elements in common */
@@ -594,21 +488,10 @@ public final class FixedBitSet extends BitSet {
 
   /** this = this AND other */
   public void and(FixedBitSet other) {
-    final int otherNumWords = other.numWords;
-    final LongBuffer otherArr = other.bits;
-    int len = Math.min(this.numWords, otherNumWords);
-    int i = 0;
-    for (int lim = S.loopBound(len); i < lim; i += INC) {
-      long off = (long) i << 3;
-      LongVector vThis = LongVector.fromMemorySegment(S, this.memorySegment, off, NATIVE_ORDER);
-      LongVector vOther = LongVector.fromMemorySegment(S, other.memorySegment, off, NATIVE_ORDER);
-      vThis.and(vOther).intoMemorySegment(this.memorySegment, off, NATIVE_ORDER);
-    }
-    for (; i < len; ++i) {
-      this.bits.put(i, this.bits.get(i) & otherArr.get(i));
-    }
-    if (this.numWords > otherNumWords) {
-      fill(otherNumWords, this.numWords, 0L);
+    int len = Math.min(this.numWords, other.numWords);
+    SUPPORT.and(memorySegment, bits, other.memorySegment, other.bits, len);
+    if (this.numWords > other.numWords) {
+      fill(other.numWords, this.numWords, 0L);
     }
   }
 
@@ -636,20 +519,8 @@ public final class FixedBitSet extends BitSet {
   }
 
   private void andNot(final int otherOffsetWords, FixedBitSet other) {
-    final LongBuffer otherArr = other.bits;
     int len = Math.min(numWords - otherOffsetWords, other.numWords);
-    int i = 0;
-    for (int lim = S.loopBound(len); i < lim; i += INC) {
-      long thisOff = (long) (i + otherOffsetWords) << 3;
-      long otherOff = (long) i << 3;
-      LongVector vThis = LongVector.fromMemorySegment(S, this.memorySegment, thisOff, NATIVE_ORDER);
-      LongVector vOther = LongVector.fromMemorySegment(S, other.memorySegment, otherOff, NATIVE_ORDER);
-      vThis.lanewise(VectorOperators.AND_NOT, vOther).intoMemorySegment(this.memorySegment, thisOff, NATIVE_ORDER);
-    }
-    for (; i < len; ++i) {
-      int off = i + otherOffsetWords;
-      this.bits.put(off, this.bits.get(off) & ~otherArr.get(i));
-    }
+    SUPPORT.andNot(memorySegment, bits, otherOffsetWords, other.memorySegment, other.bits, len);
   }
 
   /**
@@ -705,21 +576,7 @@ public final class FixedBitSet extends BitSet {
 
     bits.put(startWord, bits.get(startWord) ^ startmask);
 
-    // Vectorized middle inversion
-    int i = startWord + 1;
-    int len = endWord - i;
-    if (len >= INC) {
-      for (int lim = i + S.loopBound(len); i < lim; i += INC) {
-        long off = (long) i << 3;
-        LongVector v = LongVector.fromMemorySegment(S, memorySegment, off, NATIVE_ORDER);
-        v.not().intoMemorySegment(memorySegment, off, NATIVE_ORDER);
-      }
-    }
-
-    // Scalar tail for remaining words
-    for (; i < endWord; i++) {
-      bits.put(i, ~bits.get(i));
-    }
+    SUPPORT.flipWords(memorySegment, bits, startWord + 1, endWord);
 
     bits.put(endWord, bits.get(endWord) ^ endmask);
   }
@@ -763,21 +620,7 @@ public final class FixedBitSet extends BitSet {
   }
 
   private void fill(int startWord, int endWord, long val) {
-    assert val == 0 || val == -1L; // otherwise ByteOrder matters
-    int i = startWord;
-    int len = endWord - startWord;
-
-    if (len >= INC) {
-      // Create a vector where all lanes contain 'val' (e.g., 0L or -1L)
-      LongVector fillVector = LongVector.broadcast(S, val);
-      for (int lim = startWord + S.loopBound(len); i < lim; i += INC) {
-        fillVector.intoMemorySegment(memorySegment, (long) i << 3, NATIVE_ORDER);
-      }
-    }
-    // Scalar tail
-    for (; i < endWord; i++) {
-      bits.put(i, val);
-    }
+    SUPPORT.fill(memorySegment, bits, startWord, endWord, val);
   }
 
   @Override

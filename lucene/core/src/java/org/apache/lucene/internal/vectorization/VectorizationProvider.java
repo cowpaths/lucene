@@ -97,6 +97,9 @@ public abstract class VectorizationProvider {
   /** Returns a FlatVectorsScorer that supports the Lucene99 format. */
   public abstract FlatVectorsScorer getLucene99FlatVectorsScorer();
 
+  /** Returns a {@link FixedBitSetSupport} for vectorized bit-set operations. */
+  public abstract FixedBitSetSupport getFixedBitSetSupport();
+
   // *** Lookup mechanism: ***
 
   private static final Logger LOG = Logger.getLogger(VectorizationProvider.class.getName());
@@ -206,7 +209,8 @@ public abstract class VectorizationProvider {
   private static final Set<String> VALID_CALLERS =
       Set.of(
           "org.apache.lucene.codecs.hnsw.FlatVectorScorerUtil",
-          "org.apache.lucene.util.VectorUtil");
+          "org.apache.lucene.util.VectorUtil",
+          "org.apache.lucene.util.FixedBitSet");
 
   private static void ensureCaller() {
     final boolean validCaller =
