@@ -46,13 +46,14 @@ final class PanamaFixedBitSetSupport extends FixedBitSetSupport {
   @Override
   public long popCount(Object msObj, LongBuffer bits, int fromWord, int numWords) {
     MemorySegment ms = (MemorySegment) msObj;
-    long tot = 0;
     int i = 0;
+    LongVector acc = LongVector.zero(S);
     for (int lim = S.loopBound(numWords); i < lim; i += INC) {
       LongVector v =
           LongVector.fromMemorySegment(S, ms, (long) (fromWord + i) << 3, NATIVE_ORDER);
-      tot += v.lanewise(VectorOperators.BIT_COUNT).reduceLanes(VectorOperators.ADD);
+      acc = acc.add(v.lanewise(VectorOperators.BIT_COUNT));
     }
+    long tot = acc.reduceLanes(VectorOperators.ADD);
     for (; i < numWords; i++) {
       tot += Long.bitCount(bits.get(fromWord + i));
     }
@@ -64,14 +65,15 @@ final class PanamaFixedBitSetSupport extends FixedBitSetSupport {
       Object aMsObj, LongBuffer aBits, Object bMsObj, LongBuffer bBits, int numCommonWords) {
     MemorySegment aMs = (MemorySegment) aMsObj;
     MemorySegment bMs = (MemorySegment) bMsObj;
-    long tot = 0;
     int i = 0;
+    LongVector acc = LongVector.zero(S);
     for (int lim = S.loopBound(numCommonWords); i < lim; i += INC) {
       long off = (long) i << 3;
       LongVector vA = LongVector.fromMemorySegment(S, aMs, off, NATIVE_ORDER);
       LongVector vB = LongVector.fromMemorySegment(S, bMs, off, NATIVE_ORDER);
-      tot += vA.and(vB).lanewise(VectorOperators.BIT_COUNT).reduceLanes(VectorOperators.ADD);
+      acc = acc.add(vA.and(vB).lanewise(VectorOperators.BIT_COUNT));
     }
+    long tot = acc.reduceLanes(VectorOperators.ADD);
     for (; i < numCommonWords; i++) {
       tot += Long.bitCount(aBits.get(i) & bBits.get(i));
     }
@@ -88,15 +90,16 @@ final class PanamaFixedBitSetSupport extends FixedBitSetSupport {
       int bNumWords) {
     MemorySegment aMs = (MemorySegment) aMsObj;
     MemorySegment bMs = (MemorySegment) bMsObj;
-    long tot = 0;
     final int numCommonWords = Math.min(aNumWords, bNumWords);
     int i = 0;
+    LongVector acc = LongVector.zero(S);
     for (int lim = S.loopBound(numCommonWords); i < lim; i += INC) {
       long off = (long) i << 3;
       LongVector vA = LongVector.fromMemorySegment(S, aMs, off, NATIVE_ORDER);
       LongVector vB = LongVector.fromMemorySegment(S, bMs, off, NATIVE_ORDER);
-      tot += vA.or(vB).lanewise(VectorOperators.BIT_COUNT).reduceLanes(VectorOperators.ADD);
+      acc = acc.add(vA.or(vB).lanewise(VectorOperators.BIT_COUNT));
     }
+    long tot = 0;
     int alignedLim;
     if (i == numCommonWords) {
       alignedLim = i;
@@ -114,13 +117,14 @@ final class PanamaFixedBitSetSupport extends FixedBitSetSupport {
     }
     for (int lim = S.loopBound(aNumWords); i < lim; i += INC) {
       LongVector v = LongVector.fromMemorySegment(S, aMs, (long) i << 3, NATIVE_ORDER);
-      tot += v.lanewise(VectorOperators.BIT_COUNT).reduceLanes(VectorOperators.ADD);
+      acc = acc.add(v.lanewise(VectorOperators.BIT_COUNT));
     }
     int j = alignedLim;
     for (int lim = S.loopBound(bNumWords); j < lim; j += INC) {
       LongVector v = LongVector.fromMemorySegment(S, bMs, (long) j << 3, NATIVE_ORDER);
-      tot += v.lanewise(VectorOperators.BIT_COUNT).reduceLanes(VectorOperators.ADD);
+      acc = acc.add(v.lanewise(VectorOperators.BIT_COUNT));
     }
+    tot += acc.reduceLanes(VectorOperators.ADD);
     for (; i < aNumWords; ++i) {
       tot += Long.bitCount(aBits.get(i));
     }
@@ -140,18 +144,18 @@ final class PanamaFixedBitSetSupport extends FixedBitSetSupport {
       int bNumWords) {
     MemorySegment aMs = (MemorySegment) aMsObj;
     MemorySegment bMs = (MemorySegment) bMsObj;
-    long tot = 0;
     final int numCommonWords = Math.min(aNumWords, bNumWords);
     int i = 0;
+    LongVector acc = LongVector.zero(S);
     for (int lim = S.loopBound(numCommonWords); i < lim; i += INC) {
       long off = (long) i << 3;
       LongVector vA = LongVector.fromMemorySegment(S, aMs, off, NATIVE_ORDER);
       LongVector vB = LongVector.fromMemorySegment(S, bMs, off, NATIVE_ORDER);
-      tot +=
-          vA.lanewise(VectorOperators.AND_NOT, vB)
-              .lanewise(VectorOperators.BIT_COUNT)
-              .reduceLanes(VectorOperators.ADD);
+      acc =
+          acc.add(
+              vA.lanewise(VectorOperators.AND_NOT, vB).lanewise(VectorOperators.BIT_COUNT));
     }
+    long tot = 0;
     if (i < numCommonWords) {
       int alignedLim = i + INC;
       for (; i < numCommonWords; ++i) {
@@ -163,8 +167,9 @@ final class PanamaFixedBitSetSupport extends FixedBitSetSupport {
     }
     for (int lim = S.loopBound(aNumWords); i < lim; i += INC) {
       LongVector v = LongVector.fromMemorySegment(S, aMs, (long) i << 3, NATIVE_ORDER);
-      tot += v.lanewise(VectorOperators.BIT_COUNT).reduceLanes(VectorOperators.ADD);
+      acc = acc.add(v.lanewise(VectorOperators.BIT_COUNT));
     }
+    tot += acc.reduceLanes(VectorOperators.ADD);
     for (; i < aNumWords; ++i) {
       tot += Long.bitCount(aBits.get(i));
     }
