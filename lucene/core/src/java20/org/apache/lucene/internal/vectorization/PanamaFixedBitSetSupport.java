@@ -16,7 +16,12 @@
  */
 package org.apache.lucene.internal.vectorization;
 
+import java.lang.foreign.FunctionDescriptor;
+import java.lang.foreign.Linker;
 import java.lang.foreign.MemorySegment;
+import java.lang.foreign.SymbolLookup;
+import java.lang.foreign.ValueLayout;
+import java.lang.invoke.MethodHandle;
 import java.nio.Buffer;
 import java.nio.ByteOrder;
 import java.nio.LongBuffer;
@@ -32,6 +37,36 @@ final class PanamaFixedBitSetSupport extends FixedBitSetSupport {
   private static final int INC = S.length();
   private static final int VECTOR_BYTE_SIZE = S.vectorByteSize();
   private static final ByteOrder NATIVE_ORDER = ByteOrder.nativeOrder();
+
+  private static final MethodHandle MADVISE_HANDLE = getMadviseHandle();
+
+  private static MethodHandle getMadviseHandle() {
+    Linker linker = Linker.nativeLinker();
+    // Look up the symbol once during class loading
+    SymbolLookup stdlib = linker.defaultLookup();
+
+    MemorySegment madviseAddress =
+        stdlib.find("madvise").orElseThrow(() -> new RuntimeException("madvise not found"));
+
+    // Function signature: int madvise(void *addr, size_t length, int advice)
+    FunctionDescriptor descriptor =
+        FunctionDescriptor.of(
+            ValueLayout.JAVA_INT, // Return type
+            ValueLayout.ADDRESS, // addr
+            ValueLayout.JAVA_LONG, // length (size_t)
+            ValueLayout.JAVA_INT // advice
+        );
+
+    return linker.downcallHandle(madviseAddress, descriptor);
+  }
+
+  @Override
+  public boolean madvise(Object ms, int advice) throws Throwable {
+    MemorySegment segment = (MemorySegment) ms;
+    // 2. Execute the call directly on the memory segment
+    int result = (int) MADVISE_HANDLE.invokeExact(segment, segment.byteSize(), advice);
+    return result == 0;
+  }
 
   @Override
   public int vectorByteSize() {

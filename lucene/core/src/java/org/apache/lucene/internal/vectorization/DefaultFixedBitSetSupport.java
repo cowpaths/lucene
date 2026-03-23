@@ -141,4 +141,9 @@ final class DefaultFixedBitSetSupport extends FixedBitSetSupport {
       bits.put(i, val);
     }
   }
+
+  @Override
+  public boolean madvise(Object ms, int advice) {
+    return false;
+  }
 }

@@ -107,4 +107,10 @@ public abstract class FixedBitSetSupport {
    * be {@code 0L} or {@code -1L}.
    */
   public abstract void fill(Object ms, LongBuffer bits, int startWord, int endWord, long val);
+
+  /**
+   * Calls native funciton madvise, if available. Returns {@code true} if the call was
+   * successful/supported, otherwise {@code false}.
+   */
+  public abstract boolean madvise(Object ms, int advice) throws Throwable;
 }

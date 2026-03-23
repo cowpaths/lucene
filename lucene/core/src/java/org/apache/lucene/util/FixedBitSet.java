@@ -38,7 +38,7 @@ public final class FixedBitSet extends BitSet {
   private static final long BASE_RAM_BYTES_USED =
       RamUsageEstimator.shallowSizeOfInstance(FixedBitSet.class);
 
-  static final FixedBitSetSupport SUPPORT;
+  private static final FixedBitSetSupport SUPPORT;
   public static final int VECTOR_BYTE_SIZE;
 
   static {
@@ -619,6 +619,10 @@ public final class FixedBitSet extends BitSet {
 
   private void fill(int startWord, int endWord, long val) {
     SUPPORT.fill(memorySegment, bits, startWord, endWord, val);
+  }
+
+  public static boolean madvise(Object ms, int advice) throws Throwable {
+    return SUPPORT.madvise(ms, advice);
   }
 
   @Override
