@@ -1808,7 +1808,7 @@ public class TestIndexWriter extends LuceneTestCase {
   public void testCarryOverHasBlocks() throws Exception {
     try (Directory dir = newDirectory()) {
       try (IndexWriter w =
-          new IndexWriter(dir, new IndexWriterConfig(new MockAnalyzer(random())))) {
+          new IndexWriter(dir, new IndexWriterConfig(new MockAnalyzer(random())).setParentField("__parent__"))) {
 
         final List<Document> docs = new ArrayList<>();
         docs.add(new Document());
@@ -4495,7 +4495,7 @@ public class TestIndexWriter extends LuceneTestCase {
 
   public void testMaxCompletedSequenceNumber() throws IOException, InterruptedException {
     try (Directory dir = newDirectory();
-        IndexWriter writer = new IndexWriter(dir, new IndexWriterConfig()); ) {
+        IndexWriter writer = new IndexWriter(dir, new IndexWriterConfig().setParentField("__parent__")); ) {
       assertEquals(1, writer.addDocument(new Document()));
       assertEquals(2, writer.updateDocument(new Term("foo", "bar"), new Document()));
       writer.flushNextBuffer();
@@ -4585,6 +4585,7 @@ public class TestIndexWriter extends LuceneTestCase {
           public void close() throws IOException {}
         };
     IndexWriterConfig indexWriterConfig = newIndexWriterConfig();
+    indexWriterConfig.setParentField("__parent__");
     indexWriterConfig.setInfoStream(stream);
     try (Directory dir = newDirectory();
         IndexWriter writer =

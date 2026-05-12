@@ -22,6 +22,9 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -35,6 +38,7 @@ import org.apache.lucene.util.Accountable;
 import org.apache.lucene.util.IOConsumer;
 import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.InfoStream;
+import org.apache.lucene.util.ThreadInterruptedException;
 
 /**
  * This class accepts multiple added documents and directly writes segment files.
@@ -86,6 +90,8 @@ final class DocumentsWriter implements Closeable, Accountable {
 
   private final InfoStream infoStream;
 
+  private final ExecutorService exec;
+
   private final LiveIndexWriterConfig config;
 
   private final AtomicInteger numDocsInRAM = new AtomicInteger(0);
@@ -117,11 +123,15 @@ final class DocumentsWriter implements Closeable, Accountable {
     this.config = config;
     this.infoStream = config.getInfoStream();
     this.deleteQueue = new DocumentsWriterDeleteQueue(infoStream);
+    this.exec = Executors.newCachedThreadPool();
     this.perThreadPool =
         new DocumentsWriterPerThreadPool(
-            () -> {
+            (bucket) -> {
               final FieldInfos.Builder infos = new FieldInfos.Builder(globalFieldNumberMap);
               return new DocumentsWriterPerThread(
+                  bucket,
+                  exec,
+                  this,
                   indexCreatedVersionMajor,
                   segmentNameSupplier.get(),
                   directoryOrig,
@@ -377,7 +387,17 @@ final class DocumentsWriter implements Closeable, Accountable {
   @Override
   public void close() throws IOException {
     closed = true;
+    exec.shutdown();
     IOUtils.close(flushControl, perThreadPool);
+    try {
+      if (!exec.awaitTermination(5, TimeUnit.SECONDS)) {
+        infoStream.message("DW", "timed out closing ExecutorService");
+        exec.shutdownNow();
+      }
+    } catch (InterruptedException e) {
+      Thread.currentThread().interrupt();
+      throw new ThreadInterruptedException(e);
+    }
   }
 
   private boolean preUpdate() throws IOException {

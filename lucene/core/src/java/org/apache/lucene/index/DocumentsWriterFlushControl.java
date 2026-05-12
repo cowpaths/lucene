@@ -570,7 +570,8 @@ final class DocumentsWriterFlushControl implements Accountable, Closeable {
         // Insert a gap in seqNo of current active thread count, in the worst case each of those
         // threads now have one operation in flight.  It's fine
         // if we have some sequence numbers that were never assigned:
-        seqNo = documentsWriter.resetDeleteQueue(perThreadPool.size());
+        int size = perThreadPool.size();
+        seqNo = documentsWriter.resetDeleteQueue(config.getParentField() == null ? size * size : size);
       } finally {
         perThreadPool.unlockNewWriters();
       }
