@@ -266,7 +266,6 @@ final class DocumentsWriterPerThread implements Accountable, Lock {
       }
       final int docsInRamBefore = numDocsInRAM;
       boolean allDocsIndexed = false;
-      long myBucket = Long.MIN_VALUE;
       long now = System.currentTimeMillis() - TEMPORAL_ADJUST_MILLIS;
       LongObjectHashMap<Map.Entry<BlockingQueue<Iterable<? extends IndexableField>>, Future<?>>> delegates = new LongObjectHashMap<>();
       AtomicBoolean failed = new AtomicBoolean();
@@ -283,10 +282,8 @@ final class DocumentsWriterPerThread implements Accountable, Lock {
                 doc = addParentField(doc, parentField);
               }
             } else if (dw != null) {
-              long bucketId = mapToBucket(doc, now, myBucket);
-              if (myBucket == Long.MIN_VALUE) {
-                myBucket = bucketId;
-              } else if (bucketId != myBucket) {
+              long bucketId = mapToBucket(doc, now, bucket);
+              if (bucketId != bucket) {
                 delegate(bucketId, doc, delegates, p, failed);
                 continue;
               }
@@ -508,7 +505,7 @@ final class DocumentsWriterPerThread implements Accountable, Lock {
   private static long mapToBucket(Iterable<? extends IndexableField> doc, long now, long myBucket) {
     if (TEMPORAL_FIELD_NAME == null) {
       // default for test coverage
-      return System.identityHashCode(doc) % 4;
+      return THREE_DAYS + (System.identityHashCode(doc) % 4);
     } else {
       IndexableField f = StreamSupport.stream(doc.spliterator(), false).filter(v -> TEMPORAL_FIELD_NAME.equals(v.name())).findFirst().orElse(null);
       if (f == null) {
