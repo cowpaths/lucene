@@ -245,6 +245,7 @@ final class DocumentsWriterPerThread implements Accountable, Lock {
   }
 
   long updateDocuments(
+      boolean delegate,
       Iterable<? extends Iterable<? extends IndexableField>> docs,
       DocumentsWriterDeleteQueue.Node<?> deleteNode,
       DocumentsWriter.FlushNotifications flushNotifications,
@@ -267,9 +268,16 @@ final class DocumentsWriterPerThread implements Accountable, Lock {
       final int docsInRamBefore = numDocsInRAM;
       boolean allDocsIndexed = false;
       long now = System.currentTimeMillis() - TEMPORAL_ADJUST_MILLIS;
-      LongObjectHashMap<Map.Entry<BlockingQueue<Iterable<? extends IndexableField>>, Future<?>>> delegates = new LongObjectHashMap<>();
+      final LongObjectHashMap<Map.Entry<BlockingQueue<Iterable<? extends IndexableField>>, Future<?>>> delegates;
+      final Phaser p;
+      if (delegate) {
+        delegates = null;
+        p = null;
+      } else {
+        delegates = new LongObjectHashMap<>();
+        p = new Phaser(1);
+      }
       AtomicBoolean failed = new AtomicBoolean();
-      Phaser p = new Phaser(1);
       long seqNo;
       Throwable delegateException = null;
       try {
@@ -281,7 +289,7 @@ final class DocumentsWriterPerThread implements Accountable, Lock {
               if (iterator.hasNext() == false) {
                 doc = addParentField(doc, parentField);
               }
-            } else if (dw != null) {
+            } else if (!delegate && dw != null) {
               long bucketId = mapToBucket(doc, now, bucket);
               if (bucketId != bucket) {
                 delegate(bucketId, doc, delegates, p, failed);
@@ -311,7 +319,7 @@ final class DocumentsWriterPerThread implements Accountable, Lock {
           failed.set(true);
           throw t;
         } finally {
-          if (!delegates.isEmpty()) {
+          if (delegates != null && !delegates.isEmpty()) {
             // Phase 1: signal delegates that all docs have been enqueued, then wait for
             // delegates to finish adding their docs (but not yet finishDocuments).
             try {
@@ -343,7 +351,7 @@ final class DocumentsWriterPerThread implements Accountable, Lock {
         // Phase 2: release delegates (always, if phase 1 happened) so they can complete
         // their own finishDocuments call, which will consume the deleteNode from the
         // global queue with the correct per-delegate docIdUpTo boundary.
-        if (!delegates.isEmpty()) {
+        if (delegates != null && !delegates.isEmpty()) {
           try {
             p.arrive();
             List<Throwable> delegateExceptions = collectDelegateResults(delegates);
@@ -392,11 +400,8 @@ final class DocumentsWriterPerThread implements Accountable, Lock {
     return exceptions;
   }
 
-  private static final ThreadLocal<Long> BUCKET = new ThreadLocal<>();
-
-  static long getBucket() {
-    Long bucket = BUCKET.get();
-    return bucket == null ? THREE_DAYS : bucket;
+  static long defaultBucket() {
+    return THREE_DAYS;
   }
 
   private void delegate(long bucketId, Iterable<? extends IndexableField> doc, LongObjectHashMap<Map.Entry<BlockingQueue<Iterable<? extends IndexableField>>, Future<?>>> delegates, Phaser p, AtomicBoolean failed) {
@@ -410,9 +415,8 @@ final class DocumentsWriterPerThread implements Accountable, Lock {
       p.register();
       Future<?> f = exec.submit(() -> {
         boolean[] exhausted = new boolean[1];
-        BUCKET.set(bucketId);
         try {
-          dw.updateDocuments(new Iterable<Iterable<? extends IndexableField>>() {
+          dw.updateDocuments(true, bucketId, new Iterable<Iterable<? extends IndexableField>>() {
             @Override
             public Iterator<Iterable<? extends IndexableField>> iterator() {
               return new Iterator<Iterable<? extends IndexableField>>() {
@@ -465,7 +469,6 @@ final class DocumentsWriterPerThread implements Accountable, Lock {
             throw new PropagatedException(t);
           }
         } finally {
-          BUCKET.remove();
           if (!exhausted[0]) {
             p.arriveAndDeregister();
           }
@@ -501,6 +504,10 @@ final class DocumentsWriterPerThread implements Accountable, Lock {
   private static final long THREE_MONTHS = TimeUnit.DAYS.toMillis(90);
   private static final long SIX_MONTHS = TimeUnit.DAYS.toMillis(180);
   private static final long ALL_TIME = Long.MAX_VALUE;
+
+  static long mapToBucket(Iterable<? extends IndexableField> doc) {
+    return mapToBucket(doc, System.currentTimeMillis() - TEMPORAL_ADJUST_MILLIS, THREE_DAYS);
+  }
 
   private static long mapToBucket(Iterable<? extends IndexableField> doc, long now, long defaultBucket) {
     if (TEMPORAL_FIELD_NAME == null) {

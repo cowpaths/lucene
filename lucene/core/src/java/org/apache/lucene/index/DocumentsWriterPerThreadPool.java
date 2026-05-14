@@ -114,8 +114,11 @@ final class DocumentsWriterPerThreadPool implements Iterable<DocumentsWriterPerT
    * operation (add/updateDocument).
    */
   DocumentsWriterPerThread getAndLock() {
+    return getAndLock(DocumentsWriterPerThread.defaultBucket());
+  }
+
+  DocumentsWriterPerThread getAndLock(long bucket) {
     ensureOpen();
-    long bucket = DocumentsWriterPerThread.getBucket();
     DocumentsWriterPerThread dwpt = freeList.computeIfAbsent(bucket, (k) -> new LockableConcurrentApproximatePriorityQueue<>()).lockAndPoll();
     if (dwpt != null) {
       return dwpt;

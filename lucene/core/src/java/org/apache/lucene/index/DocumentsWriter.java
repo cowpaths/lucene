@@ -20,6 +20,7 @@ import java.io.Closeable;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
@@ -54,7 +55,7 @@ import org.apache.lucene.util.ThreadInterruptedException;
  * <p>Threads:
  *
  * <p>Multiple threads are allowed into addDocument at once. There is an initial synchronized call
- * to {@link DocumentsWriterFlushControl#obtainAndLock()} which allocates a DWPT for this indexing
+ * to {@link DocumentsWriterFlushControl#obtainAndLock(long)} which allocates a DWPT for this indexing
  * thread. The same thread will not necessarily get the same DWPT over time. Then updateDocuments is
  * called on that DWPT without synchronization (most of the "heavy lifting" is in this call). Once a
  * DWPT fills up enough RAM or hold enough documents in memory the DWPT is checked out for flush and
@@ -426,13 +427,38 @@ final class DocumentsWriter implements Closeable, Accountable {
     return hasEvents;
   }
 
+  private static final boolean ENABLE_REROUTING = !"false".equals(System.getProperty("lucene.temporalField.enableFlushReroute"));
+
   long updateDocuments(
+      final Iterable<? extends Iterable<? extends IndexableField>> rawDocs,
+      final DocumentsWriterDeleteQueue.Node<?> delNode)
+      throws IOException {
+    final Iterable<? extends Iterable<? extends IndexableField>> docs;
+    long bucket;
+    boolean delegate;
+    if (ENABLE_REROUTING && config.getParentField() == null) {
+      Iterator<? extends Iterable<? extends IndexableField>> rawIter = rawDocs.iterator();
+      Iterable<? extends IndexableField> peekDoc = rawIter.next();
+      delegate = !rawIter.hasNext(); // if no next, don't re-check.
+      docs = new PeekIterable(rawDocs, rawIter, peekDoc);
+      bucket = DocumentsWriterPerThread.mapToBucket(peekDoc);
+    } else {
+      docs = rawDocs;
+      bucket = -1;
+      delegate = true;
+    }
+    return updateDocuments(delegate, bucket, docs, delNode);
+  }
+
+  long updateDocuments(
+      boolean delegate,
+      long bucket,
       final Iterable<? extends Iterable<? extends IndexableField>> docs,
       final DocumentsWriterDeleteQueue.Node<?> delNode)
       throws IOException {
     boolean hasEvents = preUpdate();
 
-    final DocumentsWriterPerThread dwpt = flushControl.obtainAndLock();
+    final DocumentsWriterPerThread dwpt = flushControl.obtainAndLock(bucket);
     final DocumentsWriterPerThread flushingDWPT;
     long seqNo;
 
@@ -443,7 +469,7 @@ final class DocumentsWriter implements Closeable, Accountable {
       final int docsInRamBefore = dwpt.getNumDocsInRAM();
       try {
         seqNo =
-            dwpt.updateDocuments(docs, delNode, flushNotifications, numDocsInRAM::incrementAndGet);
+            dwpt.updateDocuments(delegate, docs, delNode, flushNotifications, numDocsInRAM::incrementAndGet);
       } finally {
         if (dwpt.isAborted()) {
           flushControl.doOnAbort(dwpt);
@@ -735,5 +761,50 @@ final class DocumentsWriter implements Closeable, Accountable {
    */
   long getFlushingBytes() {
     return flushControl.getFlushingBytes();
+  }
+
+  static final class PeekIterable implements Iterable<Iterable<? extends IndexableField>> {
+    private final Iterable<? extends Iterable<? extends IndexableField>> delegate;
+    private Iterator<? extends Iterable<? extends IndexableField>> it;
+    private Iterable<? extends IndexableField> first;
+
+    public PeekIterable(Iterable<? extends Iterable<? extends IndexableField>> delegate,
+          Iterator<? extends Iterable<? extends IndexableField>> it,
+          Iterable<? extends IndexableField> first) {
+      this.delegate = delegate;
+      this.it = it;
+      this.first = first;
+    }
+
+    @Override
+    @SuppressWarnings("unchecked")
+    public Iterator<Iterable<? extends IndexableField>> iterator() {
+      if (it == null) {
+        return (Iterator<Iterable<? extends IndexableField>>) delegate.iterator();
+      } else {
+        Iterator<? extends Iterable<? extends IndexableField>> ret = it;
+        it = null;
+        Iterable<? extends IndexableField> retFirst = first;
+        first = null;
+        return new Iterator<Iterable<? extends IndexableField>>() {
+          Iterable<? extends IndexableField> myFirst = retFirst;
+
+          @Override
+          public boolean hasNext() {
+            return myFirst != null || ret.hasNext();
+          }
+
+          @Override
+          public Iterable<? extends IndexableField> next() {
+            if (myFirst != null) {
+              Iterable<? extends IndexableField> v = myFirst;
+              myFirst = null;
+              return v;
+            }
+            return ret.next();
+          }
+        };
+      }
+    }
   }
 }
