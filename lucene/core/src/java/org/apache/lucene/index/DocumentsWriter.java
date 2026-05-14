@@ -440,6 +440,7 @@ final class DocumentsWriter implements Closeable, Accountable {
       // This must happen after we've pulled the DWPT because IW.close
       // waits for all DWPT to be released:
       ensureOpen();
+      final int docsInRamBefore = dwpt.getNumDocsInRAM();
       try {
         seqNo =
             dwpt.updateDocuments(docs, delNode, flushNotifications, numDocsInRAM::incrementAndGet);
@@ -448,7 +449,10 @@ final class DocumentsWriter implements Closeable, Accountable {
           flushControl.doOnAbort(dwpt);
         }
       }
-      flushingDWPT = flushControl.doAfterDocument(dwpt);
+      // Only call doAfterDocument if the primary DWPT actually indexed docs. If all docs were
+      // routed to delegate DWPTs (temporal bucket routing), the primary has 0 new docs and
+      // each delegate already triggered its own doAfterDocument.
+      flushingDWPT = dwpt.getNumDocsInRAM() > docsInRamBefore ? flushControl.doAfterDocument(dwpt) : null;
     } finally {
       if (dwpt.isFlushPending() || dwpt.isAborted()) {
         dwpt.unlock();
