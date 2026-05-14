@@ -502,33 +502,41 @@ final class DocumentsWriterPerThread implements Accountable, Lock {
   private static final long SIX_MONTHS = TimeUnit.DAYS.toMillis(180);
   private static final long ALL_TIME = Long.MAX_VALUE;
 
-  private static long mapToBucket(Iterable<? extends IndexableField> doc, long now, long myBucket) {
+  private static long mapToBucket(Iterable<? extends IndexableField> doc, long now, long defaultBucket) {
     if (TEMPORAL_FIELD_NAME == null) {
       // default for test coverage
       return THREE_DAYS + (System.identityHashCode(doc) % 4);
     } else {
       IndexableField f = StreamSupport.stream(doc.spliterator(), false).filter(v -> TEMPORAL_FIELD_NAME.equals(v.name())).findFirst().orElse(null);
       if (f == null) {
-        return myBucket;
+        return defaultBucket;
       } else {
         long timestamp = f.numericValue().longValue(); // millis since epoch
-        long diff = now - timestamp;
-        if (diff < 0) {
-          return myBucket;
-        } else if (diff < THREE_DAYS) {
-          return THREE_DAYS;
-        } else if (diff < ONE_WEEK) {
-          return ONE_WEEK;
-        } else if (diff < ONE_MONTH) {
-          return ONE_MONTH;
-        } else if (diff < THREE_MONTHS) {
-          return THREE_MONTHS;
-        } else if (diff < SIX_MONTHS) {
-          return SIX_MONTHS;
-        } else {
-          return ALL_TIME;
-        }
+        return mapToBucket(timestamp, now, defaultBucket);
       }
+    }
+  }
+
+  public static long mapToBucket(long timestamp, long now) {
+    return mapToBucket(timestamp, now, THREE_DAYS);
+  }
+
+  private static long mapToBucket(long timestamp, long now, long defaultBucket) {
+    long diff = now - timestamp;
+    if (diff < 0) {
+      return defaultBucket;
+    } else if (diff < THREE_DAYS) {
+      return THREE_DAYS;
+    } else if (diff < ONE_WEEK) {
+      return ONE_WEEK;
+    } else if (diff < ONE_MONTH) {
+      return ONE_MONTH;
+    } else if (diff < THREE_MONTHS) {
+      return THREE_MONTHS;
+    } else if (diff < SIX_MONTHS) {
+      return SIX_MONTHS;
+    } else {
+      return ALL_TIME;
     }
   }
 
