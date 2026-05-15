@@ -20,6 +20,7 @@ import java.io.IOException;
 import java.text.NumberFormat;
 import java.util.AbstractMap;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
@@ -401,7 +402,7 @@ final class DocumentsWriterPerThread implements Accountable, Lock {
   }
 
   static long defaultBucket() {
-    return THREE_DAYS;
+    return DEFAULT_BUCKET;
   }
 
   private void delegate(long bucketId, Iterable<? extends IndexableField> doc, LongObjectHashMap<Map.Entry<BlockingQueue<Iterable<? extends IndexableField>>, Future<?>>> delegates, Phaser p, AtomicBoolean failed) {
@@ -497,54 +498,84 @@ final class DocumentsWriterPerThread implements Accountable, Lock {
 
   private static final String TEMPORAL_FIELD_NAME = System.getProperty("lucene.temporalField.name"); // e.g., EventStart
   private static final long TEMPORAL_ADJUST_MILLIS = TimeUnit.DAYS.toMillis(Long.parseLong(System.getProperty("lucene.temporalField.adjust", "0")));
+  private static final long[] BOUNDARIES;
+  private static final long DEFAULT_BUCKET;
 
-  private static final long THREE_DAYS = TimeUnit.DAYS.toMillis(3);
-  private static final long ONE_WEEK = TimeUnit.DAYS.toMillis(7);
-  private static final long ONE_MONTH = TimeUnit.DAYS.toMillis(30);
-  private static final long THREE_MONTHS = TimeUnit.DAYS.toMillis(90);
-  private static final long SIX_MONTHS = TimeUnit.DAYS.toMillis(180);
-  private static final long ALL_TIME = Long.MAX_VALUE;
+  /**
+   * Default boundaries correspond to natural boundaries (-1w, 1d, 1w, 1m, 3m, 6m) with some padding.
+   * The initial "-1w" is designed to catch timestamps that are pathologically far in the future.
+   * These will be batched in their own bucket. Such segments may naturally age into normal buckets --
+   * but this protects against the case where a single doc absurdly far in the future (like, thousands
+   * of years) might prevent its associated segment (and subsequent merged segments) from <i>ever</i>
+   * aging out of the "most recent" bucket.
+   */
+  private static final long[] DEFAULT_BOUNDARIES = new long[] {-9, 3, 9, 32, 94, 184}; // <- days (converted to millis)
+
+  static {
+    for (int i = DEFAULT_BOUNDARIES.length - 1; i >= 0; i--) {
+      // convert days to millis
+      DEFAULT_BOUNDARIES[i] = TimeUnit.DAYS.toMillis(DEFAULT_BOUNDARIES[i]);
+    }
+  }
+
+  static {
+    String boundariesSpec = System.getProperty("lucene.temporalField.boundaries");
+    long[] array;
+    long last;
+    if (boundariesSpec == null) {
+      array = DEFAULT_BOUNDARIES;
+      last = array[0]; // we can guarantee no AIOOBE
+    } else {
+      try {
+        array = Arrays.stream(boundariesSpec.split(", *")).mapToLong((v) -> TimeUnit.DAYS.toMillis(Long.parseLong(v))).toArray();
+        last = array[0]; // maybe AIOOBE
+      } catch (Throwable t) {
+        throw new IllegalArgumentException("bad boundariesSpec: " + boundariesSpec, t);
+      }
+    }
+    long defaultBucket = last;
+    for (int i = 1; i < array.length; i++) {
+      long v = array[i];
+      if (v <= last) {
+        throw new IllegalArgumentException("boundariesSpec must be in-order; found: " + boundariesSpec);
+      }
+      if (defaultBucket <= 0) {
+        // ideally the default bucket will be the smallest _positive_ bucket
+        defaultBucket = v;
+      }
+      last = v;
+    }
+    BOUNDARIES = array;
+    DEFAULT_BUCKET = defaultBucket;
+  }
 
   static long mapToBucket(Iterable<? extends IndexableField> doc) {
-    return mapToBucket(doc, System.currentTimeMillis() - TEMPORAL_ADJUST_MILLIS, THREE_DAYS);
+    return mapToBucket(doc, System.currentTimeMillis() - TEMPORAL_ADJUST_MILLIS, defaultBucket());
   }
 
   private static long mapToBucket(Iterable<? extends IndexableField> doc, long now, long defaultBucket) {
     if (TEMPORAL_FIELD_NAME == null) {
       // default for test coverage
-      return THREE_DAYS + (System.identityHashCode(doc) % 4);
+      return defaultBucket + (System.identityHashCode(doc) % 4);
     } else {
       IndexableField f = StreamSupport.stream(doc.spliterator(), false).filter(v -> TEMPORAL_FIELD_NAME.equals(v.name())).findFirst().orElse(null);
       if (f == null) {
         return defaultBucket;
       } else {
         long timestamp = f.numericValue().longValue(); // millis since epoch
-        return mapToBucket(timestamp, now, defaultBucket);
+        return mapToBucket(timestamp, now);
       }
     }
   }
 
   public static long mapToBucket(long timestamp, long now) {
-    return mapToBucket(timestamp, now, THREE_DAYS);
-  }
-
-  private static long mapToBucket(long timestamp, long now, long defaultBucket) {
     long diff = now - timestamp;
-    if (diff < 0) {
-      return defaultBucket;
-    } else if (diff < THREE_DAYS) {
-      return THREE_DAYS;
-    } else if (diff < ONE_WEEK) {
-      return ONE_WEEK;
-    } else if (diff < ONE_MONTH) {
-      return ONE_MONTH;
-    } else if (diff < THREE_MONTHS) {
-      return THREE_MONTHS;
-    } else if (diff < SIX_MONTHS) {
-      return SIX_MONTHS;
-    } else {
-      return ALL_TIME;
+    for (long v : BOUNDARIES) {
+      if (diff <= v) {
+        return v;
+      }
     }
+    return Long.MAX_VALUE;
   }
 
   private Iterable<? extends IndexableField> addParentField(
