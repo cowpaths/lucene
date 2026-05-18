@@ -43,7 +43,6 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.Lock;
 import java.util.concurrent.locks.ReentrantLock;
-import java.util.stream.StreamSupport;
 import org.apache.lucene.codecs.Codec;
 import org.apache.lucene.document.NumericDocValuesField;
 import org.apache.lucene.index.DocumentsWriterDeleteQueue.DeleteSlice;
@@ -496,7 +495,31 @@ final class DocumentsWriterPerThread implements Accountable, Lock {
     throw new UnsupportedOperationException();
   };
 
-  private static final String TEMPORAL_FIELD_NAME = System.getProperty("lucene.temporalField.name"); // e.g., EventStart
+  private static final String TEMPORAL_FIELD_NAME; // e.g., EventStart
+
+  /**
+   * If {@link #TEMPORAL_FIELD_NAME} field not present, use a value from one of these fields as a fallback
+   * (in descending order of priority).
+   */
+  private static final String[] FALLBACK_FIELD_NAMES;
+
+  static {
+    String spec = System.getProperty("lucene.temporalField.name");
+    if (spec == null) {
+      TEMPORAL_FIELD_NAME = null;
+      FALLBACK_FIELD_NAMES = null;
+    } else {
+      String[] fields = spec.split(", *");
+      TEMPORAL_FIELD_NAME = fields[0];
+      if (fields.length < 2) {
+        FALLBACK_FIELD_NAMES = null;
+      } else {
+        FALLBACK_FIELD_NAMES = new String[fields.length - 1];
+        System.arraycopy(fields, 1, FALLBACK_FIELD_NAMES, 0, FALLBACK_FIELD_NAMES.length);
+      }
+    }
+  }
+
   private static final long TEMPORAL_ADJUST_MILLIS = TimeUnit.DAYS.toMillis(Long.parseLong(System.getProperty("lucene.temporalField.adjust", "0")));
   private static final long[] BOUNDARIES;
   private static final long DEFAULT_BUCKET;
@@ -558,13 +581,37 @@ final class DocumentsWriterPerThread implements Accountable, Lock {
       // default for test coverage
       return defaultBucket + (System.identityHashCode(doc) % 4);
     } else {
-      IndexableField f = StreamSupport.stream(doc.spliterator(), false).filter(v -> TEMPORAL_FIELD_NAME.equals(v.name())).findFirst().orElse(null);
-      if (f == null) {
-        return defaultBucket;
+      int fallbackIdx;
+      IndexableField[] fallbacks;
+      if (FALLBACK_FIELD_NAMES == null) {
+        fallbackIdx = -1;
+        fallbacks = null;
       } else {
-        long timestamp = f.numericValue().longValue(); // millis since epoch
-        return mapToBucket(timestamp, now);
+        fallbackIdx = FALLBACK_FIELD_NAMES.length - 1;
+        fallbacks = new IndexableField[FALLBACK_FIELD_NAMES.length];
       }
+      for (IndexableField f : doc) {
+        String name = f.name();
+        if (TEMPORAL_FIELD_NAME.equals(name)) {
+          return mapToBucket(f.numericValue().longValue(), now);
+        } else if (FALLBACK_FIELD_NAMES != null) {
+          for (int i = fallbackIdx; i >= 0; i--) {
+            if (FALLBACK_FIELD_NAMES[i].equals(name)) {
+              fallbacks[i] = f;
+              fallbackIdx = i - 1;
+            }
+          }
+        }
+      }
+      if (FALLBACK_FIELD_NAMES != null) {
+        for (int i = fallbackIdx + 1, lim = FALLBACK_FIELD_NAMES.length; i < lim; i++) {
+          IndexableField f = fallbacks[i];
+          if (f != null) {
+            return mapToBucket(f.numericValue().longValue(), now);
+          }
+        }
+      }
+      return defaultBucket;
     }
   }
 
