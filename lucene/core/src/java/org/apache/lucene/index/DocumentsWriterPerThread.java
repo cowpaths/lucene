@@ -18,16 +18,27 @@ package org.apache.lucene.index;
 
 import java.io.IOException;
 import java.text.NumberFormat;
+import java.util.AbstractMap;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Set;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
+import java.util.concurrent.Phaser;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.Lock;
@@ -35,6 +46,7 @@ import java.util.concurrent.locks.ReentrantLock;
 import org.apache.lucene.codecs.Codec;
 import org.apache.lucene.document.NumericDocValuesField;
 import org.apache.lucene.index.DocumentsWriterDeleteQueue.DeleteSlice;
+import org.apache.lucene.internal.hppc.LongObjectHashMap;
 import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.store.FlushInfo;
@@ -47,6 +59,7 @@ import org.apache.lucene.util.FixedBitSet;
 import org.apache.lucene.util.InfoStream;
 import org.apache.lucene.util.SetOnce;
 import org.apache.lucene.util.StringHelper;
+import org.apache.lucene.util.ThreadInterruptedException;
 import org.apache.lucene.util.Version;
 
 final class DocumentsWriterPerThread implements Accountable, Lock {
@@ -141,7 +154,14 @@ final class DocumentsWriterPerThread implements Accountable, Lock {
   private int numDeletedDocIds = 0;
   private final IndexingChain.ReservedField<NumericDocValuesField> parentField;
 
+  final long bucket;
+  private final ExecutorService exec;
+  private final DocumentsWriter dw;
+
   DocumentsWriterPerThread(
+      long bucket,
+      ExecutorService exec,
+      DocumentsWriter dw,
       int indexMajorVersionCreated,
       String segmentName,
       Directory directoryOrig,
@@ -151,6 +171,9 @@ final class DocumentsWriterPerThread implements Accountable, Lock {
       FieldInfos.Builder fieldInfos,
       AtomicLong pendingNumDocs,
       boolean enableTestPoints) {
+    this.bucket = bucket;
+    this.exec = exec;
+    this.dw = dw;
     this.directory = new TrackingDirectoryWrapper(directory);
     this.fieldInfos = fieldInfos;
     this.indexWriterConfig = indexWriterConfig;
@@ -222,6 +245,7 @@ final class DocumentsWriterPerThread implements Accountable, Lock {
   }
 
   long updateDocuments(
+      boolean delegate,
       Iterable<? extends Iterable<? extends IndexableField>> docs,
       DocumentsWriterDeleteQueue.Node<?> deleteNode,
       DocumentsWriter.FlushNotifications flushNotifications,
@@ -243,44 +267,387 @@ final class DocumentsWriterPerThread implements Accountable, Lock {
       }
       final int docsInRamBefore = numDocsInRAM;
       boolean allDocsIndexed = false;
+      long now = System.currentTimeMillis() - TEMPORAL_ADJUST_MILLIS;
+      final LongObjectHashMap<Map.Entry<BlockingQueue<Iterable<? extends IndexableField>>, Future<?>>> delegates;
+
+      // Phaser to enforce execution order in different phases, execution for all participants (primary DWPT and delegate
+      // DWPTs) needs to be completed in current phase before safely advance to next phase:
+      // Phase 1: primary DWPT and delegate DWPTs finish processing all the docs from the iterator. The delegate DWPTs
+      // block inside hasNext() (after receiving SENTINEL) at the phase barrier, before returning false to the caller's loop.
+      // Phase 2: primary DWPT calls finishDocuments, which publish the deleteNode to the global delete queue, update
+      // its deletion slice and apply the deleteNode to its pendingUpdates (updates/deletions only). Delegate DWPTs do
+      // nothing as they immediately arrive at the end of phase 2 and wait for phase 3 to be released by primary DWPT.
+      // Phase 3: primary DWPT signals delegate DWPTs to proceed. Each delegate DWPT exits the loop and calls finishDocuments,
+      // take note that deleteNode for delegates is always null as the main DWPT has already published the deletion to
+      // global queue. It is important that delegate DWPTs call finishDocuments after the main DWPT's published deletion,
+      // as it would mark the deletion of current batch with its own docIdUpTo boundary.
+      // Otherwise, if delegates call finishDocuments before the main DWPT, delegates would not pick up this batch's
+      // deleteNode and a later DWPT (next batch) would then be the first to encounter it and apply it with a higher
+      // docIdUpTo, potentially deleting docs that should have been kept.
+      // After the delegate DWPTs finish, the primary DWPT will be unblocked from collectDelegateResults
+      // and proceed to return the final result/exception.
+      final Phaser p;
+      // this doc was delegated from the primary DW to this DWPT, so we should handle it directly without further delegation
+      if (delegate) {
+        delegates = null;
+        p = null;
+      } else { // this is the main DW, so we should prepare to delegate to other DWPTs as needed
+        delegates = new LongObjectHashMap<>();
+        p = new Phaser(1);
+      }
+      AtomicBoolean failed = new AtomicBoolean();
+      long seqNo;
+      Throwable delegateException = null;
       try {
         final Iterator<? extends Iterable<? extends IndexableField>> iterator = docs.iterator();
-        while (iterator.hasNext()) {
-          Iterable<? extends IndexableField> doc = iterator.next();
-          if (parentField != null) {
-            if (iterator.hasNext() == false) {
-              doc = addParentField(doc, parentField);
+        try {
+          while (iterator.hasNext()) {
+            Iterable<? extends IndexableField> doc = iterator.next();
+            if (parentField != null) {
+              if (iterator.hasNext() == false) {
+                doc = addParentField(doc, parentField);
+              }
+            } else if (!delegate && dw != null) { //TODO: perhaps even if parentField != null, we should still delegate?
+              long bucketId = mapToBucket(doc, now, bucket);
+              if (bucketId != bucket) {
+                delegate(bucketId, doc, delegates, p, failed);
+                continue;
+              }
+            }
+            // Even on exception, the document is still added (but marked
+            // deleted), so we don't need to un-reserve at that point.
+            // Aborting exceptions will actually "lose" more than one
+            // document, so the counter will be "wrong" in that case, but
+            // it's very hard to fix (we can't easily distinguish aborting
+            // vs non-aborting exceptions):
+            reserveOneDoc();
+            try {
+              indexingChain.processDocument(numDocsInRAM++, doc);
+            } finally {
+              onNewDocOnRAM.run();
+            }
+            if (failed.get()) {
+              // exit early from our loop
+              throw new PropagatedException(null);
             }
           }
-          // Even on exception, the document is still added (but marked
-          // deleted), so we don't need to un-reserve at that point.
-          // Aborting exceptions will actually "lose" more than one
-          // document, so the counter will be "wrong" in that case, but
-          // it's very hard to fix (we can't easily distinguish aborting
-          // vs non-aborting exceptions):
-          reserveOneDoc();
-          try {
-            indexingChain.processDocument(numDocsInRAM++, doc);
-          } finally {
-            onNewDocOnRAM.run();
+        } catch (PropagatedException ex) {
+          assert failed.get(); // swallow in favor of throwing original exception
+        } catch (Throwable t) {
+          failed.set(true);
+          throw t;
+        } finally {
+          if (delegates != null && !delegates.isEmpty()) {
+            // Phase 1: signal delegates that all docs have been enqueued, then wait for
+            // delegates to finish adding their docs (but not yet finishDocuments).
+            try {
+              for (LongObjectHashMap.LongObjectCursor<Map.Entry<BlockingQueue<Iterable<? extends IndexableField>>, Future<?>>> bucket : delegates) {
+                bucket.value.getKey().put(SENTINEL);
+              }
+            } catch (InterruptedException ex) {
+              Thread.currentThread().interrupt();
+            } finally {
+              p.arriveAndAwaitAdvance();
+              // Phase 2: All delegates have finished adding their doc, entering phase 2 for primary DWPT to call finishDocuments
+              // while all delegate DWPTs are blocked in Phase 2
+            }
           }
         }
-        final int numDocs = numDocsInRAM - docsInRamBefore;
-        if (numDocs > 1) {
-          segmentInfo.setHasBlocks();
+        if (failed.get()) {
+          seqNo = -1;
+        } else {
+          final int numDocs = numDocsInRAM - docsInRamBefore;
+          if (numDocs > 1) {
+            segmentInfo.setHasBlocks();
+          }
+          allDocsIndexed = true;
+          // Call finishDocuments here, between phases, so that the deleteNode is in the
+          // global queue before delegates call their own finishDocuments. This ensures
+          // delegates consume it with the correct docIdUpTo boundary, protecting their
+          // newly-added docs from being deleted by their own batch's delete term.
+          seqNo = finishDocuments(deleteNode, docsInRamBefore);
         }
-        allDocsIndexed = true;
-        return finishDocuments(deleteNode, docsInRamBefore);
       } finally {
+        if (delegates != null && !delegates.isEmpty()) {
+          try {
+            // Phase 3: release delegates (always, if phase 1 happened) so they can complete
+            // their own finishDocuments call, which will consume the deleteNode from the
+            // global queue with the correct per-delegate docIdUpTo boundary.
+            p.arrive();
+            List<Throwable> delegateExceptions = collectDelegateResults(delegates);
+            if (!delegateExceptions.isEmpty()) {
+              delegateException = delegateExceptions.get(0);
+            }
+          } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+          }
+        }
         if (!allDocsIndexed && !aborted) {
           // the iterator threw an exception that is not aborting
           // go and mark all docs from this block as deleted
           deleteLastDocs(numDocsInRAM - docsInRamBefore);
         }
       }
+      if (delegateException != null) {
+        if (delegateException instanceof IOException) {
+          throw (IOException) delegateException;
+        } else {
+          throw new RuntimeException(delegateException);
+        }
+      }
+      if (failed.get()) {
+        throw new RuntimeException("failed (fallback)");
+      }
+      assert seqNo != -1;
+      return seqNo;
     } finally {
       maybeAbort("updateDocuments", flushNotifications);
     }
+  }
+
+  private static List<Throwable> collectDelegateResults(LongObjectHashMap<Map.Entry<BlockingQueue<Iterable<? extends IndexableField>>, Future<?>>> delegates) throws InterruptedException {
+    List<Throwable> exceptions = new ArrayList<>();
+    for (LongObjectHashMap.LongObjectCursor<Map.Entry<BlockingQueue<Iterable<? extends IndexableField>>, Future<?>>> bucket : delegates) {
+      try {
+        bucket.value.getValue().get();
+      } catch (ExecutionException e) {
+        Throwable cause = e.getCause();
+        if (!(cause instanceof PropagatedException)) {
+          exceptions.add(cause);
+        }
+      }
+    }
+    return exceptions;
+  }
+
+  static long defaultBucket() {
+    return DEFAULT_BUCKET;
+  }
+
+  private void delegate(long bucketId, Iterable<? extends IndexableField> doc, LongObjectHashMap<Map.Entry<BlockingQueue<Iterable<? extends IndexableField>>, Future<?>>> delegates, Phaser p, AtomicBoolean failed) {
+    int i = delegates.indexOf(bucketId);
+    BlockingQueue<Iterable<? extends IndexableField>> queue;
+    if (i >= 0) {
+      queue = delegates.indexGet(i).getKey();
+    } else {
+      //each queue allows buffering up to this # of docs for delegate of this bucket to be streamed as iterator to DW
+      queue = new ArrayBlockingQueue<>(256);
+      DocumentsWriter dw = this.dw;
+      p.register();
+      Future<?> f = exec.submit(() -> { // submit a background job to start streaming doc to DW as iterator which reads the queue
+        boolean[] exhausted = new boolean[1];
+        try {
+          dw.updateDocuments(true, bucketId, new Iterable<Iterable<? extends IndexableField>>() {
+            @Override
+            public Iterator<Iterable<? extends IndexableField>> iterator() {
+              return new Iterator<Iterable<? extends IndexableField>>() {
+                private Iterable<? extends IndexableField> nextDoc;
+
+                @Override
+                public boolean hasNext() {
+                  //the coordinating primary DW sends this signal to each DWPT when the original iterator is exhausted, so we know there's no more doc for this bucket
+                  if (nextDoc == SENTINEL) {
+                    return false;
+                  } else if (nextDoc != null) {
+                    return true;
+                  }
+                  try {
+                    nextDoc = queue.take();
+                  } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw new ThreadInterruptedException(e);
+                  }
+                  if (nextDoc == SENTINEL) {
+                    exhausted[0] = true;
+                    p.arriveAndAwaitAdvance(); // Finished phase 1 for this delegate, block until phase 2
+                    p.arriveAndAwaitAdvance(); // phase 2 for delegates does nothing, block until phase 3
+
+                    // phase 3: primary DWPT has published deleteNode via finishDocuments in phase 2. Safe to
+                    // unblock caller(delegate DWPT)'s iteration on this and eventually calls finishDocuments too.
+                    if (failed.get()) {
+                      throw new PropagatedException(null);
+                    }
+                    return false;
+                  } else {
+                    return true;
+                  }
+                }
+
+                @Override
+                public Iterable<? extends IndexableField> next() {
+                  if (!hasNext()) {
+                    throw new NoSuchElementException();
+                  }
+                  Iterable<? extends IndexableField> ret = nextDoc;
+                  nextDoc = null;
+                  return ret;
+                }
+              };
+            }
+          }, null);
+        } catch (PropagatedException t) {
+          // swallow since it originated from elsewhere
+        } catch (Throwable t) {
+          if (failed.compareAndSet(false, true)) {
+            throw t;
+          } else {
+            throw new PropagatedException(t);
+          }
+        } finally {
+          if (!exhausted[0]) {
+            p.arriveAndDeregister();
+          }
+        }
+        return null;
+      });
+      delegates.indexInsert(i, bucketId, new AbstractMap.SimpleImmutableEntry<>(queue, f));
+    }
+    try {
+      queue.put(doc);
+    } catch (InterruptedException ex) {
+      Thread.currentThread().interrupt();
+      throw new ThreadInterruptedException(ex);
+    }
+  }
+
+  private static final class PropagatedException extends RuntimeException {
+    public PropagatedException(Throwable cause) {
+      super(cause);
+    }
+  }
+
+  private static final Iterable<? extends IndexableField> SENTINEL = (Iterable<IndexableField>) () -> {
+    throw new UnsupportedOperationException();
+  };
+
+  private static final String TEMPORAL_FIELD_NAME; // e.g., EventStart
+
+  /**
+   * If {@link #TEMPORAL_FIELD_NAME} field not present, use a value from one of these fields as a fallback
+   * (in descending order of priority).
+   */
+  private static final String[] FALLBACK_FIELD_NAMES;
+
+  static {
+    String spec = System.getProperty("lucene.temporalField.name");
+    if (spec == null) {
+      TEMPORAL_FIELD_NAME = null;
+      FALLBACK_FIELD_NAMES = null;
+    } else {
+      String[] fields = spec.split(", *");
+      TEMPORAL_FIELD_NAME = fields[0];
+      if (fields.length < 2) {
+        FALLBACK_FIELD_NAMES = null;
+      } else {
+        FALLBACK_FIELD_NAMES = new String[fields.length - 1];
+        System.arraycopy(fields, 1, FALLBACK_FIELD_NAMES, 0, FALLBACK_FIELD_NAMES.length);
+      }
+    }
+  }
+
+  private static final long TEMPORAL_ADJUST_MILLIS = TimeUnit.DAYS.toMillis(Long.parseLong(System.getProperty("lucene.temporalField.adjust", "0")));
+  private static final long[] BOUNDARIES;
+  private static final long DEFAULT_BUCKET;
+
+  /**
+   * Default boundaries correspond to natural boundaries (-1w, 1d, 1w, 1m, 3m, 6m) with some padding.
+   * The initial "-1w" is designed to catch timestamps that are pathologically far in the future.
+   * These will be batched in their own bucket. Such segments may naturally age into normal buckets --
+   * but this protects against the case where a single doc absurdly far in the future (like, thousands
+   * of years) might prevent its associated segment (and subsequent merged segments) from <i>ever</i>
+   * aging out of the "most recent" bucket.
+   */
+  private static final long[] DEFAULT_BOUNDARIES = new long[] {-9, 3, 9, 32, 94, 184}; // <- days (converted to millis)
+
+  static {
+    for (int i = DEFAULT_BOUNDARIES.length - 1; i >= 0; i--) {
+      // convert days to millis
+      DEFAULT_BOUNDARIES[i] = TimeUnit.DAYS.toMillis(DEFAULT_BOUNDARIES[i]);
+    }
+  }
+
+  static {
+    String boundariesSpec = System.getProperty("lucene.temporalField.boundaries");
+    long[] array;
+    long last;
+    if (boundariesSpec == null) {
+      array = DEFAULT_BOUNDARIES;
+      last = array[0]; // we can guarantee no AIOOBE
+    } else {
+      try {
+        array = Arrays.stream(boundariesSpec.split(", *")).mapToLong((v) -> TimeUnit.DAYS.toMillis(Long.parseLong(v))).toArray();
+        last = array[0]; // maybe AIOOBE
+      } catch (Throwable t) {
+        throw new IllegalArgumentException("bad boundariesSpec: " + boundariesSpec, t);
+      }
+    }
+    long defaultBucket = last;
+    for (int i = 1; i < array.length; i++) {
+      long v = array[i];
+      if (v <= last) {
+        throw new IllegalArgumentException("boundariesSpec must be in-order; found: " + boundariesSpec);
+      }
+      if (defaultBucket <= 0) {
+        // ideally the default bucket will be the smallest _positive_ bucket
+        defaultBucket = v;
+      }
+      last = v;
+    }
+    BOUNDARIES = array;
+    DEFAULT_BUCKET = defaultBucket;
+  }
+
+  static long mapToBucket(Iterable<? extends IndexableField> doc) {
+    return mapToBucket(doc, System.currentTimeMillis() - TEMPORAL_ADJUST_MILLIS, defaultBucket());
+  }
+
+  private static long mapToBucket(Iterable<? extends IndexableField> doc, long now, long defaultBucket) {
+    if (TEMPORAL_FIELD_NAME == null) {
+      // default for test coverage
+      return defaultBucket + (System.identityHashCode(doc) % 4);
+    } else {
+      int fallbackIdx;
+      IndexableField[] fallbacks;
+      if (FALLBACK_FIELD_NAMES == null) {
+        fallbackIdx = -1;
+        fallbacks = null;
+      } else {
+        fallbackIdx = FALLBACK_FIELD_NAMES.length - 1;
+        fallbacks = new IndexableField[FALLBACK_FIELD_NAMES.length];
+      }
+      for (IndexableField f : doc) {
+        String name = f.name();
+        if (TEMPORAL_FIELD_NAME.equals(name)) {
+          return mapToBucket(f.numericValue().longValue(), now);
+        } else if (FALLBACK_FIELD_NAMES != null) {
+          for (int i = fallbackIdx; i >= 0; i--) {
+            if (FALLBACK_FIELD_NAMES[i].equals(name)) {
+              fallbacks[i] = f;
+              fallbackIdx = i - 1;
+            }
+          }
+        }
+      }
+      if (FALLBACK_FIELD_NAMES != null) {
+        for (int i = fallbackIdx + 1, lim = FALLBACK_FIELD_NAMES.length; i < lim; i++) {
+          IndexableField f = fallbacks[i];
+          if (f != null) {
+            return mapToBucket(f.numericValue().longValue(), now);
+          }
+        }
+      }
+      return defaultBucket;
+    }
+  }
+
+  public static long mapToBucket(long timestamp, long now) {
+    long diff = now - timestamp;
+    for (long v : BOUNDARIES) {
+      if (diff <= v) {
+        return v;
+      }
+    }
+    return Long.MAX_VALUE;
   }
 
   private Iterable<? extends IndexableField> addParentField(

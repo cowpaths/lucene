@@ -31,8 +31,11 @@ public class TestDocumentsWriterPerThreadPool extends LuceneTestCase {
     try (Directory directory = newDirectory()) {
       DocumentsWriterPerThreadPool pool =
           new DocumentsWriterPerThreadPool(
-              () ->
+              (bucket) ->
                   new DocumentsWriterPerThread(
+                      bucket,
+                      null,
+                      null,
                       Version.LATEST.major,
                       "",
                       directory,
@@ -71,8 +74,11 @@ public class TestDocumentsWriterPerThreadPool extends LuceneTestCase {
     try (Directory directory = newDirectory()) {
       DocumentsWriterPerThreadPool pool =
           new DocumentsWriterPerThreadPool(
-              () ->
+              (bucket) ->
                   new DocumentsWriterPerThread(
+                      bucket,
+                      null,
+                      null,
                       Version.LATEST.major,
                       "",
                       directory,

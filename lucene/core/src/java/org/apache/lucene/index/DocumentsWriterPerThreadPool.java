@@ -23,8 +23,9 @@ import java.util.IdentityHashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.LongFunction;
 import java.util.function.Predicate;
-import java.util.function.Supplier;
 import org.apache.lucene.store.AlreadyClosedException;
 import org.apache.lucene.util.ThreadInterruptedException;
 
@@ -44,13 +45,13 @@ final class DocumentsWriterPerThreadPool implements Iterable<DocumentsWriterPerT
 
   private final Set<DocumentsWriterPerThread> dwpts =
       Collections.newSetFromMap(new IdentityHashMap<>());
-  private final LockableConcurrentApproximatePriorityQueue<DocumentsWriterPerThread> freeList =
-      new LockableConcurrentApproximatePriorityQueue<>();
-  private final Supplier<DocumentsWriterPerThread> dwptFactory;
+  private final ConcurrentHashMap<Long, LockableConcurrentApproximatePriorityQueue<DocumentsWriterPerThread>> freeList =
+      new ConcurrentHashMap<>();
+  private final LongFunction<DocumentsWriterPerThread> dwptFactory;
   private int takenWriterPermits = 0;
   private volatile boolean closed;
 
-  DocumentsWriterPerThreadPool(Supplier<DocumentsWriterPerThread> dwptFactory) {
+  DocumentsWriterPerThreadPool(LongFunction<DocumentsWriterPerThread> dwptFactory) {
     this.dwptFactory = dwptFactory;
   }
 
@@ -82,7 +83,7 @@ final class DocumentsWriterPerThreadPool implements Iterable<DocumentsWriterPerT
    *
    * @return a new {@link DocumentsWriterPerThread}
    */
-  private synchronized DocumentsWriterPerThread newWriter() {
+  private synchronized DocumentsWriterPerThread newWriter(long bucket) {
     assert takenWriterPermits >= 0;
     while (takenWriterPermits > 0) {
       // we can't create new DWPTs while not all permits are available
@@ -99,7 +100,7 @@ final class DocumentsWriterPerThreadPool implements Iterable<DocumentsWriterPerT
     // end of the world it's violating the contract that we don't release any new DWPT after this
     // pool is closed
     ensureOpen();
-    DocumentsWriterPerThread dwpt = dwptFactory.get();
+    DocumentsWriterPerThread dwpt = dwptFactory.apply(bucket);
     dwpt.lock(); // lock so nobody else will get this DWPT
     dwpts.add(dwpt);
     return dwpt;
@@ -113,8 +114,12 @@ final class DocumentsWriterPerThreadPool implements Iterable<DocumentsWriterPerT
    * operation (add/updateDocument).
    */
   DocumentsWriterPerThread getAndLock() {
+    return getAndLock(DocumentsWriterPerThread.defaultBucket());
+  }
+
+  DocumentsWriterPerThread getAndLock(long bucket) {
     ensureOpen();
-    DocumentsWriterPerThread dwpt = freeList.lockAndPoll();
+    DocumentsWriterPerThread dwpt = freeList.computeIfAbsent(bucket, (k) -> new LockableConcurrentApproximatePriorityQueue<>()).lockAndPoll();
     if (dwpt != null) {
       return dwpt;
     }
@@ -123,7 +128,7 @@ final class DocumentsWriterPerThreadPool implements Iterable<DocumentsWriterPerT
     // `freeList` at this point, it will be added later on once DocumentsWriter has indexed a
     // document into this DWPT and then gives it back to the pool by calling
     // #marksAsFreeAndUnlock.
-    return newWriter();
+    return newWriter(bucket);
   }
 
   private void ensureOpen() {
@@ -140,7 +145,7 @@ final class DocumentsWriterPerThreadPool implements Iterable<DocumentsWriterPerT
     final long ramBytesUsed = state.ramBytesUsed();
     assert contains(state)
         : "we tried to add a DWPT back to the pool but the pool doesn't know about this DWPT";
-    freeList.addAndUnlock(state, ramBytesUsed);
+    freeList.get(state.bucket).addAndUnlock(state, ramBytesUsed);
   }
 
   @Override
@@ -183,9 +188,9 @@ final class DocumentsWriterPerThreadPool implements Iterable<DocumentsWriterPerT
     // check if the DWPT is available.
     assert perThread.isHeldByCurrentThread();
     if (dwpts.remove(perThread)) {
-      freeList.remove(perThread);
+      freeList.get(perThread.bucket).remove(perThread);
     } else {
-      assert freeList.contains(perThread) == false;
+      assert freeList.get(perThread.bucket).contains(perThread) == false;
       return false;
     }
     return true;
