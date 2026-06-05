@@ -270,13 +270,13 @@ final class DocumentsWriterPerThread implements Accountable, Lock {
       long now = System.currentTimeMillis() - TEMPORAL_ADJUST_MILLIS;
       final LongObjectHashMap<Map.Entry<BlockingQueue<Iterable<? extends IndexableField>>, Future<?>>> delegates;
 
-      // Phaser to enforce execution order in different phases, all jobs in a phase need to be completed before
-      // safely advance to next phase:
-      // Phase 1: primary DWPT fully iterates the docs and enqueues them (or delegates). All delegated DWPTs also finishes
-      // streaming the last doc in their own invocation to this updateDocuments method BUT before existing the loop (before finishDocuments)
+      // Phaser to enforce execution order in different phases, execution for all participants (primary DWPT and delegate
+      // DWPTs) needs to be completed in current phase before safely advance to next phase:
+      // Phase 1: primary DWPT and delegate DWPTs finish processing all the docs from the iterator. The delegate DWPTs
+      // block inside hasNext() (after receiving SENTINEL) at the phase barrier, before returning false to the caller's loop.
       // Phase 2: primary DWPT calls finishDocuments, which publish the deleteNode to the global delete queue, update
       // its deletion slice and apply the deleteNode to its pendingUpdates (updates/deletions only). Delegate DWPTs do
-      // nothing as they immediately arrive at the end of phase 2 and waits for phase 3 to be released by primary DWPT.
+      // nothing as they immediately arrive at the end of phase 2 and wait for phase 3 to be released by primary DWPT.
       // Phase 3: primary DWPT signals delegate DWPTs to proceed. Each delegate DWPT exits the loop and calls finishDocuments,
       // take note that deleteNode for delegates is always null as the main DWPT has already published the deletion to
       // global queue. It is important that delegate DWPTs call finishDocuments after the main DWPT's published deletion,
