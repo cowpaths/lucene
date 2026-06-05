@@ -275,15 +275,17 @@ final class DocumentsWriterPerThread implements Accountable, Lock {
       // Phase 1: primary DWPT fully iterates the docs and enqueues them (or delegates). All delegated DWPTs also finishes
       // streaming the last doc in their own invocation to this updateDocuments method BUT before existing the loop (before finishDocuments)
       // Phase 2: primary DWPT calls finishDocuments, which publish the deleteNode to the global delete queue, update
-      // its deletion slice and apply the deleteNode to its pendingUpdates (updates/deletions only). Delegate DWPTs simply
-      // wait in this phase.
-      // Phase 3: primary DWPT signals delegate DWPTs to proceed. Each DWPT exits the loop and calls finishDocuments,
+      // its deletion slice and apply the deleteNode to its pendingUpdates (updates/deletions only). Delegate DWPTs do
+      // nothing as they immediately arrive at the end of phase 2 and waits for phase 3 to be released by primary DWPT.
+      // Phase 3: primary DWPT signals delegate DWPTs to proceed. Each delegate DWPT exits the loop and calls finishDocuments,
       // take note that deleteNode for delegates is always null as the main DWPT has already published the deletion to
-      // global queue. It is important that delegates call finishDocuments after the main DWPT has published deletion,
-      // as it would mark such deletion with its own docIdUpTo boundary. Otherwise, delegates could call finishDocuments
-      // before the main DWPT, and the next doc batch could be mistaken the deleteNode of this batch as the next batch's
-      // and pair the incorrect docIdUpTo boundary with it. After the delegate DWPTs finish, the primary DWPT will be
-      // unblocked from collectDelegateResults and proceed to return the final result/exception.
+      // global queue. It is important that delegate DWPTs call finishDocuments after the main DWPT's published deletion,
+      // as it would mark the deletion of current batch with its own docIdUpTo boundary.
+      // Otherwise, if delegates call finishDocuments before the main DWPT, delegates would not pick up this batch's
+      // deleteNode and a later DWPT (next batch) would then be the first to encounter it and apply it with a higher
+      // docIdUpTo, potentially deleting docs that should have been kept.
+      // After the delegate DWPTs finish, the primary DWPT will be unblocked from collectDelegateResults
+      // and proceed to return the final result/exception.
       final Phaser p;
       // this doc was delegated from the primary DW to this DWPT, so we should handle it directly without further delegation
       if (delegate) {
