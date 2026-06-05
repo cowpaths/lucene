@@ -269,11 +269,27 @@ final class DocumentsWriterPerThread implements Accountable, Lock {
       boolean allDocsIndexed = false;
       long now = System.currentTimeMillis() - TEMPORAL_ADJUST_MILLIS;
       final LongObjectHashMap<Map.Entry<BlockingQueue<Iterable<? extends IndexableField>>, Future<?>>> delegates;
+
+      // Phaser to enforce execution order in different phases, all jobs in a phase need to be completed before
+      // safely advance to next phase:
+      // Phase 1: primary DWPT fully iterates the docs and enqueues them (or delegates). All delegated DWPTs also finishes
+      // streaming the last doc in their own invocation to this updateDocuments method BUT before existing the loop (before finishDocuments)
+      // Phase 2: primary DWPT calls finishDocuments, which publish the deleteNode to the global delete queue, update
+      // its deletion slice and apply the deleteNode to its pendingUpdates (updates/deletions only). Delegate DWPTs simply
+      // wait in this phase.
+      // Phase 3: primary DWPT signals delegate DWPTs to proceed. Each DWPT exits the loop and calls finishDocuments,
+      // take note that deleteNode for delegates is always null as the main DWPT has already published the deletion to
+      // global queue. It is important that delegates call finishDocuments after the main DWPT has published deletion,
+      // as it would mark such deletion with its own docIdUpTo boundary. Otherwise, delegates could call finishDocuments
+      // before the main DWPT, and the next doc batch could be mistaken the deleteNode of this batch as the next batch's
+      // and pair the incorrect docIdUpTo boundary with it. After the delegate DWPTs finish, the primary DWPT will be
+      // unblocked from collectDelegateResults and proceed to return the final result/exception.
       final Phaser p;
+      // this doc was delegated from the primary DW to this DWPT, so we should handle it directly without further delegation
       if (delegate) {
         delegates = null;
         p = null;
-      } else {
+      } else { // this is the main DW, so we should prepare to delegate to other DWPTs as needed
         delegates = new LongObjectHashMap<>();
         p = new Phaser(1);
       }
@@ -289,7 +305,7 @@ final class DocumentsWriterPerThread implements Accountable, Lock {
               if (iterator.hasNext() == false) {
                 doc = addParentField(doc, parentField);
               }
-            } else if (!delegate && dw != null) {
+            } else if (!delegate && dw != null) { //TODO: perhaps even if parentField != null, we should still delegate?
               long bucketId = mapToBucket(doc, now, bucket);
               if (bucketId != bucket) {
                 delegate(bucketId, doc, delegates, p, failed);
@@ -330,6 +346,8 @@ final class DocumentsWriterPerThread implements Accountable, Lock {
               Thread.currentThread().interrupt();
             } finally {
               p.arriveAndAwaitAdvance();
+              // Phase 2: All delegates have finished adding their doc, entering phase 2 for primary DWPT to call finishDocuments
+              // while all delegate DWPTs are blocked in Phase 2
             }
           }
         }
@@ -348,11 +366,11 @@ final class DocumentsWriterPerThread implements Accountable, Lock {
           seqNo = finishDocuments(deleteNode, docsInRamBefore);
         }
       } finally {
-        // Phase 2: release delegates (always, if phase 1 happened) so they can complete
-        // their own finishDocuments call, which will consume the deleteNode from the
-        // global queue with the correct per-delegate docIdUpTo boundary.
         if (delegates != null && !delegates.isEmpty()) {
           try {
+            // Phase 3: release delegates (always, if phase 1 happened) so they can complete
+            // their own finishDocuments call, which will consume the deleteNode from the
+            // global queue with the correct per-delegate docIdUpTo boundary.
             p.arrive();
             List<Throwable> delegateExceptions = collectDelegateResults(delegates);
             if (!delegateExceptions.isEmpty()) {
@@ -410,10 +428,11 @@ final class DocumentsWriterPerThread implements Accountable, Lock {
     if (i >= 0) {
       queue = delegates.indexGet(i).getKey();
     } else {
+      //each queue allows buffering up to this # of docs for delegate of this bucket to be streamed as iterator to DW
       queue = new ArrayBlockingQueue<>(256);
       DocumentsWriter dw = this.dw;
       p.register();
-      Future<?> f = exec.submit(() -> {
+      Future<?> f = exec.submit(() -> { // submit a background job to start streaming doc to DW as iterator which reads the queue
         boolean[] exhausted = new boolean[1];
         try {
           dw.updateDocuments(true, bucketId, new Iterable<Iterable<? extends IndexableField>>() {
@@ -424,6 +443,7 @@ final class DocumentsWriterPerThread implements Accountable, Lock {
 
                 @Override
                 public boolean hasNext() {
+                  //the coordinating primary DW sends this signal to each DWPT when the original iterator is exhausted, so we know there's no more doc for this bucket
                   if (nextDoc == SENTINEL) {
                     return false;
                   } else if (nextDoc != null) {
@@ -437,8 +457,11 @@ final class DocumentsWriterPerThread implements Accountable, Lock {
                   }
                   if (nextDoc == SENTINEL) {
                     exhausted[0] = true;
-                    p.arriveAndAwaitAdvance(); // Phase 1: signal docs added, wait for primary finishDocuments
-                    p.arriveAndAwaitAdvance(); // Phase 2: primary has inserted deleteNode; now safe to finishDocuments
+                    p.arriveAndAwaitAdvance(); // Finished phase 1 for this delegate, block until phase 2
+                    p.arriveAndAwaitAdvance(); // phase 2 for delegates does nothing, block until phase 3
+
+                    // phase 3: primary DWPT has published deleteNode via finishDocuments in phase 2. Safe to
+                    // unblock caller(delegate DWPT)'s iteration on this and eventually calls finishDocuments too.
                     if (failed.get()) {
                       throw new PropagatedException(null);
                     }
