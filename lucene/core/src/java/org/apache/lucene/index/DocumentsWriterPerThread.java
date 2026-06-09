@@ -155,13 +155,9 @@ final class DocumentsWriterPerThread implements Accountable, Lock {
   private final IndexingChain.ReservedField<NumericDocValuesField> parentField;
 
   final long bucket;
-  private final ExecutorService exec;
-  private final DocumentsWriter dw;
 
   DocumentsWriterPerThread(
       long bucket,
-      ExecutorService exec,
-      DocumentsWriter dw,
       int indexMajorVersionCreated,
       String segmentName,
       Directory directoryOrig,
@@ -172,8 +168,6 @@ final class DocumentsWriterPerThread implements Accountable, Lock {
       AtomicLong pendingNumDocs,
       boolean enableTestPoints) {
     this.bucket = bucket;
-    this.exec = exec;
-    this.dw = dw;
     this.directory = new TrackingDirectoryWrapper(directory);
     this.fieldInfos = fieldInfos;
     this.indexWriterConfig = indexWriterConfig;
