@@ -694,11 +694,17 @@ public final class SegmentInfos implements Cloneable, Iterable<SegmentCommitInfo
   /** Returns a copy of this instance, also copying each SegmentInfo. */
   @Override
   public SegmentInfos clone() {
+    return cloneWithInfo(null);
+  }
+
+  public SegmentInfos cloneWithInfo(List<SegmentCommitInfo> overrideInfos) {
     try {
       final SegmentInfos sis = (SegmentInfos) super.clone();
       // deep clone, first recreate all collections:
       sis.segments = new ArrayList<>(size());
-      for (final SegmentCommitInfo info : this) {
+
+      Iterable<SegmentCommitInfo> source = overrideInfos != null ? overrideInfos : this;
+      for (final SegmentCommitInfo info : source) {
         assert info.info.getCodec() != null;
         // dont directly access segments, use add method!!!
         sis.add(info.clone());
