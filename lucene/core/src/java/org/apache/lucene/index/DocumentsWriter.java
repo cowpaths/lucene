@@ -23,9 +23,6 @@ import java.util.Collection;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
@@ -39,7 +36,6 @@ import org.apache.lucene.util.Accountable;
 import org.apache.lucene.util.IOConsumer;
 import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.InfoStream;
-import org.apache.lucene.util.ThreadInterruptedException;
 
 /**
  * This class accepts multiple added documents and directly writes segment files.
