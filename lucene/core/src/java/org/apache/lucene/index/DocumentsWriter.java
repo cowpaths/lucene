@@ -435,23 +435,24 @@ final class DocumentsWriter implements Closeable, Accountable {
       throws IOException {
     final Iterable<? extends Iterable<? extends IndexableField>> docs;
     long bucket;
-    boolean delegate;
     if (ENABLE_REROUTING && config.getParentField() == null) {
       Iterator<? extends Iterable<? extends IndexableField>> rawIter = rawDocs.iterator();
       Iterable<? extends IndexableField> peekDoc = rawIter.next();
-      delegate = !rawIter.hasNext(); // if no next, don't re-check.
+      if (rawIter.hasNext()) { //more than one doc, not supported for bucket delegation
+        bucket = -1;
+      } else {
+        bucket = DocumentsWriterPerThread.mapToBucket(peekDoc);
+      }
       docs = new PeekIterable(rawDocs, rawIter, peekDoc);
-      bucket = DocumentsWriterPerThread.mapToBucket(peekDoc);
+
     } else {
       docs = rawDocs;
       bucket = -1;
-      delegate = true;
     }
-    return updateDocuments(delegate, bucket, docs, delNode);
+    return updateDocuments(bucket, docs, delNode);
   }
 
   long updateDocuments(
-      boolean delegate,
       long bucket,
       final Iterable<? extends Iterable<? extends IndexableField>> docs,
       final DocumentsWriterDeleteQueue.Node<?> delNode)
@@ -468,7 +469,7 @@ final class DocumentsWriter implements Closeable, Accountable {
       ensureOpen();
       try {
         seqNo =
-            dwpt.updateDocuments(delegate, docs, delNode, flushNotifications, numDocsInRAM::incrementAndGet);
+            dwpt.updateDocuments(docs, delNode, flushNotifications, numDocsInRAM::incrementAndGet);
       } finally {
         if (dwpt.isAborted()) {
           flushControl.doOnAbort(dwpt);
