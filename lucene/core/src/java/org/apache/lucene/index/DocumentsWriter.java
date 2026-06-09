@@ -408,27 +408,28 @@ final class DocumentsWriter implements Closeable, Accountable {
     return hasEvents;
   }
 
-  private static final boolean ENABLE_REROUTING = !"false".equals(System.getProperty("lucene.temporalField.enableFlushReroute"));
+  //true if not explicitly enabled AND lucene.temporalField.name is defined
+  private static final boolean ENABLE_REROUTING = !"false".equals(System.getProperty("lucene.temporalField.enableFlushReroute")) && System.getProperty("lucene.temporalField.name") != null;
 
   long updateDocuments(
       final Iterable<? extends Iterable<? extends IndexableField>> rawDocs,
       final DocumentsWriterDeleteQueue.Node<?> delNode)
       throws IOException {
     final Iterable<? extends Iterable<? extends IndexableField>> docs;
-    long bucket;
+    long bucket = -1; //by default no bucket delegation
     if (ENABLE_REROUTING && config.getParentField() == null) {
       Iterator<? extends Iterable<? extends IndexableField>> rawIter = rawDocs.iterator();
-      Iterable<? extends IndexableField> peekDoc = rawIter.next();
-      if (rawIter.hasNext()) { //more than one doc, not supported for bucket delegation
-        bucket = -1;
-      } else {
-        bucket = DocumentsWriterPerThread.mapToBucket(peekDoc);
+      if (rawIter.hasNext()) {
+        Iterable<? extends IndexableField> peekDoc = rawIter.next();
+        if (!rawIter.hasNext()) { //Only support bucket delegation for single doc for now
+          bucket = DocumentsWriterPerThread.mapToBucket(peekDoc);
+        }
+        docs = new PeekIterable(rawDocs, rawIter, peekDoc);
+      } else { //empty iterator, just pass it through
+        docs = rawDocs;
       }
-      docs = new PeekIterable(rawDocs, rawIter, peekDoc);
-
     } else {
       docs = rawDocs;
-      bucket = -1;
     }
     return updateDocuments(bucket, docs, delNode);
   }
