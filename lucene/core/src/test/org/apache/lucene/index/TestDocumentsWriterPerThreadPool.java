@@ -34,8 +34,6 @@ public class TestDocumentsWriterPerThreadPool extends LuceneTestCase {
               (bucket) ->
                   new DocumentsWriterPerThread(
                       bucket,
-                      null,
-                      null,
                       Version.LATEST.major,
                       "",
                       directory,
@@ -77,8 +75,6 @@ public class TestDocumentsWriterPerThreadPool extends LuceneTestCase {
               (bucket) ->
                   new DocumentsWriterPerThread(
                       bucket,
-                      null,
-                      null,
                       Version.LATEST.major,
                       "",
                       directory,

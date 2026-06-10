@@ -512,10 +512,6 @@ public abstract class ThreadedIndexingAndSearchingTestCase extends LuceneTestCas
     MockAnalyzer analyzer = new MockAnalyzer(random());
     analyzer.setMaxTokenLength(TestUtil.nextInt(random(), 1, IndexWriter.MAX_TERM_LENGTH));
     final IndexWriterConfig conf = newIndexWriterConfig(analyzer).setCommitOnClose(false);
-    final boolean enforceSequentialPackDocIds = random().nextBoolean();
-    if (enforceSequentialPackDocIds) {
-      conf.setParentField("__parent__");
-    }
     conf.setInfoStream(new FailOnNonBulkMergesInfoStream());
     if (conf.getMergePolicy() instanceof MockRandomMergePolicy) {
       ((MockRandomMergePolicy) conf.getMergePolicy()).setDoNonBulkMerges(false);
@@ -678,9 +674,7 @@ public abstract class ThreadedIndexingAndSearchingTestCase extends LuceneTestCas
           for (ScoreDoc scoreDoc : hits.scoreDocs) {
             final int docID = scoreDoc.doc;
             if (lastDocID != -1) {
-              if (enforceSequentialPackDocIds) {
-                assertEquals(1 + lastDocID, docID);
-              }
+              assertEquals(1 + lastDocID, docID);
             } else {
               startDocID = docID;
             }
@@ -694,7 +688,7 @@ public abstract class ThreadedIndexingAndSearchingTestCase extends LuceneTestCas
             hits = s.search(new TermQuery(new Term("docid", subID)), 1);
             assertEquals(1, hits.totalHits.value);
             final int docID = hits.scoreDocs[0].doc;
-            if (lastDocID != -1 && enforceSequentialPackDocIds) {
+            if (lastDocID != -1) {
               assertEquals(1 + lastDocID, docID);
             }
             lastDocID = docID;

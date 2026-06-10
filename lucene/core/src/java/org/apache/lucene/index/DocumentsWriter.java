@@ -408,7 +408,7 @@ final class DocumentsWriter implements Closeable, Accountable {
     return hasEvents;
   }
 
-  //true if not explicitly enabled AND lucene.temporalField.name is defined
+  //true if not explicitly disabled AND lucene.temporalField.name is defined
   private static final boolean ENABLE_REROUTING = !"false".equals(System.getProperty("lucene.temporalField.enableFlushReroute")) && System.getProperty("lucene.temporalField.name") != null;
 
   long updateDocuments(
