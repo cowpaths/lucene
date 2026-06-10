@@ -38,7 +38,7 @@ public class SegmentRoutingUtil {
     }
   }
 
-  private static final Long TEMPORAL_ADJUST_NOW = getTemporalAdjustNow();
+  public static final Long TEMPORAL_ADJUST_NOW = getTemporalAdjustNow();
 
   private static Long getTemporalAdjustNow() {
     String nowString = System.getProperty("lucene.temporalField.adjustNow");
