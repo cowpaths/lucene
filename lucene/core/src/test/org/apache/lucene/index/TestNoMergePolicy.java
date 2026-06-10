@@ -63,7 +63,7 @@ public class TestNoMergePolicy extends BaseMergePolicyTestCase {
       if (m.getName().equals("clone")) {
         continue;
       }
-      if (m.getDeclaringClass() != Object.class && !Modifier.isFinal(m.getModifiers())) {
+      if (m.getDeclaringClass() != Object.class && !Modifier.isFinal(m.getModifiers()) && !Modifier.isStatic(m.getModifiers())) {
         assertTrue(m + " is not overridden ! ", m.getDeclaringClass() == NoMergePolicy.class);
       }
     }
