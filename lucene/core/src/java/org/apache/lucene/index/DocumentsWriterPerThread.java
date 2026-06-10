@@ -18,6 +18,8 @@ package org.apache.lucene.index;
 
 import java.io.IOException;
 import java.text.NumberFormat;
+import java.time.Instant;
+import java.time.format.DateTimeParseException;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
@@ -317,7 +319,22 @@ final class DocumentsWriterPerThread implements Accountable, Lock {
     }
   }
 
-  private static final long TEMPORAL_ADJUST_MILLIS = TimeUnit.DAYS.toMillis(Long.parseLong(System.getProperty("lucene.temporalField.adjust", "0")));
+  private static final Long TEMPORAL_ADJUST_NOW = getTemporalAdjustNow();
+
+  private static Long getTemporalAdjustNow() {
+    String nowString = System.getProperty("lucene.temporalField.adjustNow");
+    if (nowString == null) {
+      return null;
+    } else {
+      try {
+        Instant instant = Instant.parse(nowString);
+        return instant.toEpochMilli();
+      } catch (DateTimeParseException t) {
+        throw new IllegalArgumentException("bad temporalField.adjustNow: " + nowString, t);
+      }
+    }
+  }
+
   private static final long[] BOUNDARIES;
   private static final long DEFAULT_BUCKET;
 
@@ -370,7 +387,7 @@ final class DocumentsWriterPerThread implements Accountable, Lock {
   }
 
   static long mapToBucket(Iterable<? extends IndexableField> doc) {
-    return mapToBucket(doc, System.currentTimeMillis() - TEMPORAL_ADJUST_MILLIS, defaultBucket());
+    return mapToBucket(doc, TEMPORAL_ADJUST_NOW != null ? TEMPORAL_ADJUST_NOW : System.currentTimeMillis(), defaultBucket());
   }
 
   private static long mapToBucket(Iterable<? extends IndexableField> doc, long now, long defaultBucket) {
