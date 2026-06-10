@@ -422,7 +422,7 @@ final class DocumentsWriter implements Closeable, Accountable {
       if (rawIter.hasNext()) {
         Iterable<? extends IndexableField> peekDoc = rawIter.next();
         if (!rawIter.hasNext()) { //Only support bucket delegation for single doc for now
-          bucket = DocumentsWriterPerThread.mapToBucket(peekDoc);
+          bucket = SegmentRoutingUtil.mapToBucket(peekDoc);
         }
         docs = new PeekIterable(rawDocs, rawIter, peekDoc);
       } else { //empty iterator, just pass it through

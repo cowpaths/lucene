@@ -942,6 +942,6 @@ public abstract class MergePolicy {
   }
 
   public static long mapToBucket(long timestampMillis, long nowMillis) {
-    return DocumentsWriterPerThread.mapToBucket(timestampMillis, nowMillis);
+    return SegmentRoutingUtil.mapToBucket(timestampMillis, nowMillis);
   }
 }

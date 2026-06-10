@@ -114,7 +114,7 @@ final class DocumentsWriterPerThreadPool implements Iterable<DocumentsWriterPerT
    * operation (add/updateDocument).
    */
   DocumentsWriterPerThread getAndLock() {
-    return getAndLock(DocumentsWriterPerThread.defaultBucket());
+    return getAndLock(SegmentRoutingUtil.defaultBucket());
   }
 
   DocumentsWriterPerThread getAndLock(long bucket) {
