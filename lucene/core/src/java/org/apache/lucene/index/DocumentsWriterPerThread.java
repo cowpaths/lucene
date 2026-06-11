@@ -18,9 +18,6 @@ package org.apache.lucene.index;
 
 import java.io.IOException;
 import java.text.NumberFormat;
-import java.time.Instant;
-import java.time.format.DateTimeParseException;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
