@@ -4495,7 +4495,7 @@ public class TestIndexWriter extends LuceneTestCase {
 
   public void testMaxCompletedSequenceNumber() throws IOException, InterruptedException {
     try (Directory dir = newDirectory();
-        IndexWriter writer = new IndexWriter(dir, new IndexWriterConfig().setParentField("__parent__")); ) {
+        IndexWriter writer = new IndexWriter(dir, new IndexWriterConfig()); ) {
       assertEquals(1, writer.addDocument(new Document()));
       assertEquals(2, writer.updateDocument(new Term("foo", "bar"), new Document()));
       writer.flushNextBuffer();
@@ -4585,7 +4585,6 @@ public class TestIndexWriter extends LuceneTestCase {
           public void close() throws IOException {}
         };
     IndexWriterConfig indexWriterConfig = newIndexWriterConfig();
-    indexWriterConfig.setParentField("__parent__");
     indexWriterConfig.setInfoStream(stream);
     try (Directory dir = newDirectory();
         IndexWriter writer =
