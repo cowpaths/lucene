@@ -1808,7 +1808,7 @@ public class TestIndexWriter extends LuceneTestCase {
   public void testCarryOverHasBlocks() throws Exception {
     try (Directory dir = newDirectory()) {
       try (IndexWriter w =
-          new IndexWriter(dir, new IndexWriterConfig(new MockAnalyzer(random())).setParentField("__parent__"))) {
+          new IndexWriter(dir, new IndexWriterConfig(new MockAnalyzer(random())))) {
 
         final List<Document> docs = new ArrayList<>();
         docs.add(new Document());
