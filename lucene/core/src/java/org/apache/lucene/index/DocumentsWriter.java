@@ -408,8 +408,9 @@ final class DocumentsWriter implements Closeable, Accountable {
     return hasEvents;
   }
 
-  //true if not explicitly disabled AND lucene.temporalField.name is defined
-  private static final boolean ENABLE_REROUTING = !"false".equals(System.getProperty("lucene.temporalField.enableFlushReroute")) && System.getProperty("lucene.temporalField.name") != null;
+  //true if not explicitly disabled AND lucene.temporalField.name is defined. Execute routing for unit testing.
+  private static final boolean ENABLE_ROUTING = !"false".equals(System.getProperty("lucene.temporalField.enableFlushReroute")) &&
+          (System.getProperty("lucene.temporalField.name") != null || System.getProperty("tests.seed") != null);
 
   long updateDocuments(
       final Iterable<? extends Iterable<? extends IndexableField>> rawDocs,
@@ -417,11 +418,13 @@ final class DocumentsWriter implements Closeable, Accountable {
       throws IOException {
     final Iterable<? extends Iterable<? extends IndexableField>> docs;
     long bucket = -1; //by default no bucket delegation
-    if (ENABLE_REROUTING && config.getParentField() == null) {
+
+    //no support on parent for now as behavior is unclear, re-consider this if we need to support parent field in the future
+    if (ENABLE_ROUTING && config.getParentField() == null) {
       Iterator<? extends Iterable<? extends IndexableField>> rawIter = rawDocs.iterator();
       if (rawIter.hasNext()) {
         Iterable<? extends IndexableField> peekDoc = rawIter.next();
-        if (!rawIter.hasNext()) { //Only support bucket delegation for single doc for now
+        if (!rawIter.hasNext()) { //only support bucket delegation for single doc for now
           bucket = SegmentRoutingUtil.mapToBucket(peekDoc);
         }
         docs = new PeekIterable(rawDocs, rawIter, peekDoc);
