@@ -119,7 +119,6 @@ public class SegmentRoutingUtil {
 
   private static long mapToBucket(Iterable<? extends IndexableField> doc, long now, long defaultBucket) {
     if (TEMPORAL_FIELD_NAME == null) {
-      // default for test coverage
       return defaultBucket;
     } else {
       int fallbackIdx;
