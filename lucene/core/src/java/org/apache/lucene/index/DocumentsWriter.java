@@ -417,7 +417,7 @@ final class DocumentsWriter implements Closeable, Accountable {
       final DocumentsWriterDeleteQueue.Node<?> delNode)
       throws IOException {
     final Iterable<? extends Iterable<? extends IndexableField>> docs;
-    long bucket = -1; //by default no bucket delegation
+    long bucket = SegmentRoutingUtil.defaultBucket(); //default bucket as fallback
 
     //no support on parent for now as behavior is unclear, re-consider this if we need to support parent field in the future
     if (ENABLE_ROUTING && config.getParentField() == null) {
