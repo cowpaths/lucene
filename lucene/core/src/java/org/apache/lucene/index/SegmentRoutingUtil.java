@@ -13,16 +13,19 @@ public class SegmentRoutingUtil {
     return DEFAULT_BUCKET;
   }
 
-  private static final String TEMPORAL_FIELD_NAME; // e.g., EventStart
+  private static String TEMPORAL_FIELD_NAME; // e.g., EventStart
 
   /**
    * If {@link #TEMPORAL_FIELD_NAME} field not present, use a value from one of these fields as a fallback
    * (in descending order of priority).
    */
-  private static final String[] FALLBACK_FIELD_NAMES;
+  private static String[] FALLBACK_FIELD_NAMES;
 
   static {
-    String spec = System.getProperty("lucene.temporalField.name");
+    setProperties(System.getProperty("lucene.temporalField.name"));
+  }
+
+  static void setProperties(String spec) {
     if (spec == null) {
       TEMPORAL_FIELD_NAME = null;
       FALLBACK_FIELD_NAMES = null;
@@ -38,7 +41,7 @@ public class SegmentRoutingUtil {
     }
   }
 
-  public static final Long TEMPORAL_ADJUST_NOW = getTemporalAdjustNow();
+  public static Long TEMPORAL_ADJUST_NOW = getTemporalAdjustNow();
 
   private static Long getTemporalAdjustNow() {
     String nowString = System.getProperty("lucene.temporalField.adjustNow");
@@ -52,6 +55,11 @@ public class SegmentRoutingUtil {
         throw new IllegalArgumentException("bad temporalField.adjustNow: " + nowString, t);
       }
     }
+  }
+
+  // for testing only
+  static void setTemporalAdjustNow(Long now) {
+    TEMPORAL_ADJUST_NOW = now;
   }
 
   private static final long[] BOUNDARIES;
