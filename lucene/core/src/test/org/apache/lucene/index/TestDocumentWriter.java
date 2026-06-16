@@ -76,8 +76,9 @@ import org.junit.Assume;
 public class TestDocumentWriter extends LuceneTestCase {
 
   private static final String ROUTING_TEMPORAL_FIELD = "ts";
+  private static final String ROUTING_ADJUST_NOW_STR = "2023-11-14T22:13:20.000Z";
   private static final long ROUTING_ADJUST_NOW_MILLIS =
-      Instant.parse("2023-11-14T22:13:20.000Z").toEpochMilli();
+      Instant.parse(ROUTING_ADJUST_NOW_STR).toEpochMilli();
 
   private Directory dir;
 
@@ -633,7 +634,7 @@ public class TestDocumentWriter extends LuceneTestCase {
   public void testUpdateDocumentRouting() throws Exception {
     try {
       SegmentRoutingUtil.setProperties(ROUTING_TEMPORAL_FIELD);
-      SegmentRoutingUtil.setTemporalAdjustNow(ROUTING_ADJUST_NOW_MILLIS);
+      SegmentRoutingUtil.initBaseTime(ROUTING_ADJUST_NOW_STR);
 
       Document probe = newRoutingDoc("probe", ROUTING_ADJUST_NOW_MILLIS);
       long bucketViaDoc = SegmentRoutingUtil.mapToBucket(probe);
@@ -767,7 +768,7 @@ public class TestDocumentWriter extends LuceneTestCase {
     } finally {
       // clear properties so they don't affect other tests
       SegmentRoutingUtil.setProperties(null);
-      SegmentRoutingUtil.setTemporalAdjustNow(null);
+      SegmentRoutingUtil.initBaseTime(null);
     }
   }
 
