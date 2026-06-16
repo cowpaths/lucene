@@ -1922,7 +1922,7 @@ public class TestLRUQueryCache extends LuceneTestCase {
 
   public void testSkipCachingForRangeQuery() throws IOException {
     Directory dir = newDirectory();
-    final RandomIndexWriter w = new RandomIndexWriter(random(), dir, newIndexWriterConfig().setParentField("__parent__"));
+    final RandomIndexWriter w = new RandomIndexWriter(random(), dir);
     Document doc1 = new Document();
     doc1.add(new StringField("name", "tom", Store.YES));
     doc1.add(new LongPoint("age", 15));
