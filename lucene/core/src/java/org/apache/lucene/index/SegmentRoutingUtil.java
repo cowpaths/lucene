@@ -41,25 +41,33 @@ public class SegmentRoutingUtil {
     }
   }
 
-  public static Long TEMPORAL_ADJUST_NOW = getTemporalAdjustNow();
+  private static long NOW_BASE_IN_MILLI_SEC;
+  private static Long ADJUST_NOW;
+  static {
+    initBaseTime(System.getProperty("lucene.temporalField.adjustNow"));
+  }
 
-  private static Long getTemporalAdjustNow() {
-    String nowString = System.getProperty("lucene.temporalField.adjustNow");
+  static void initBaseTime(String nowString) {
     if (nowString == null) {
-      return null;
-    } else {
+      //subtract the current nanoTime (and scale to milliSec) from current milliSec to get the base to compute future time with only nanoTime calls
+      NOW_BASE_IN_MILLI_SEC = System.currentTimeMillis() - TimeUnit.NANOSECONDS.toMillis(System.nanoTime());
+      ADJUST_NOW = null;
+    } else { //explicitly defined a static now time. Use it for all calls
       try {
         Instant instant = Instant.parse(nowString);
-        return instant.toEpochMilli();
+        ADJUST_NOW = instant.toEpochMilli();
       } catch (DateTimeParseException t) {
         throw new IllegalArgumentException("bad temporalField.adjustNow: " + nowString, t);
       }
     }
   }
 
-  // for testing only
-  static void setTemporalAdjustNow(Long now) {
-    TEMPORAL_ADJUST_NOW = now;
+  public static long getNow() {
+    if (ADJUST_NOW != null) { //explicitly defined a static now time. Use it for all calls
+      return ADJUST_NOW;
+    } else {
+      return NOW_BASE_IN_MILLI_SEC + TimeUnit.NANOSECONDS.toMillis(System.nanoTime());
+    }
   }
 
   private static final long[] BOUNDARIES;
@@ -114,7 +122,7 @@ public class SegmentRoutingUtil {
   }
 
   static long mapToBucket(Iterable<? extends IndexableField> doc) {
-    return mapToBucket(doc, TEMPORAL_ADJUST_NOW != null ? TEMPORAL_ADJUST_NOW : System.currentTimeMillis(), defaultBucket());
+    return mapToBucket(doc, getNow(), defaultBucket());
   }
 
   private static long mapToBucket(Iterable<? extends IndexableField> doc, long now, long defaultBucket) {
