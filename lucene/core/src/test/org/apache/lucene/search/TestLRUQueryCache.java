@@ -1992,7 +1992,7 @@ public class TestLRUQueryCache extends LuceneTestCase {
 
   public void testSkipCachingForTermQuery() throws IOException {
     Directory dir = newDirectory();
-    final RandomIndexWriter w = new RandomIndexWriter(random(), dir, newIndexWriterConfig().setParentField("__parent__"));
+    final RandomIndexWriter w = new RandomIndexWriter(random(), dir);
     Document doc1 = new Document();
     doc1.add(new StringField("name", "tom", Store.YES));
     doc1.add(new StringField("hobby", "movie", Store.YES));
@@ -2060,7 +2060,7 @@ public class TestLRUQueryCache extends LuceneTestCase {
     Directory dir = newDirectory();
     RandomIndexWriter w =
         new RandomIndexWriter(
-            random(), dir, newIndexWriterConfig().setMergePolicy(NoMergePolicy.INSTANCE).setParentField("__parent__"));
+            random(), dir, newIndexWriterConfig().setMergePolicy(NoMergePolicy.INSTANCE));
     Document doc1 = new Document();
     doc1.add(new TextField("words", "tom ran", Store.NO));
     Document doc2 = new Document();
