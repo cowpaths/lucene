@@ -41,7 +41,8 @@ public class SegmentRoutingUtil {
     }
   }
 
-  private static long NOW_BASE_IN_MILLI_SEC;
+  private static long NOW_BASE_MILLI_SEC;
+  private static long REF_NANO_SEC;
   private static Long ADJUST_NOW;
   static {
     initBaseTime(System.getProperty("lucene.temporalField.adjustNow"));
@@ -49,8 +50,8 @@ public class SegmentRoutingUtil {
 
   static void initBaseTime(String nowString) {
     if (nowString == null) {
-      //subtract the current nanoTime (and scale to milliSec) from current milliSec to get the base to compute future time with only nanoTime calls
-      NOW_BASE_IN_MILLI_SEC = System.currentTimeMillis() - TimeUnit.NANOSECONDS.toMillis(System.nanoTime());
+      NOW_BASE_MILLI_SEC = System.currentTimeMillis();
+      REF_NANO_SEC = System.nanoTime();
       ADJUST_NOW = null;
     } else { //explicitly defined a static now time. Use it for all calls
       try {
@@ -66,7 +67,7 @@ public class SegmentRoutingUtil {
     if (ADJUST_NOW != null) { //explicitly defined a static now time. Use it for all calls
       return ADJUST_NOW;
     } else {
-      return NOW_BASE_IN_MILLI_SEC + TimeUnit.NANOSECONDS.toMillis(System.nanoTime());
+      return NOW_BASE_MILLI_SEC + TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - REF_NANO_SEC);
     }
   }
 
