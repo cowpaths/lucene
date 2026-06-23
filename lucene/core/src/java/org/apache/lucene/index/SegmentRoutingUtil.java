@@ -131,10 +131,11 @@ public class SegmentRoutingUtil {
   static long mapToBucket(Iterable<? extends IndexableField> doc) {
     Long docTemporalVal = getDocTemporalVal(doc);
     if (useDynamicNow && docTemporalVal != null) {
-      if (DYNAMIC_NOW.get() != -1 && DYNAMIC_NOW.get() < docTemporalVal) {
-        System.err.println("WARNING: doc temporal value is in the future relative to current dynamic now. docTemporalVal=" + Instant.ofEpochMilli(docTemporalVal) + ", DYNAMIC_NOW=" + Instant.ofEpochMilli(DYNAMIC_NOW.get()));
+      if (DYNAMIC_NOW.get() != -1 && DYNAMIC_NOW.get() > docTemporalVal) {
+        System.err.println("WARNING: doc temporal value is in the past relative to current dynamic now. docTemporalVal=" + Instant.ofEpochMilli(docTemporalVal) + ", DYNAMIC_NOW=" + Instant.ofEpochMilli(DYNAMIC_NOW.get()));
+      } else {
+        DYNAMIC_NOW.set(docTemporalVal); //just pretend that now is when the doc is processed
       }
-      DYNAMIC_NOW.set(docTemporalVal); //just pretend that now is when the doc is processed
     }
 
     return mapToBucket(doc, getNow(), docTemporalVal , defaultBucket());
