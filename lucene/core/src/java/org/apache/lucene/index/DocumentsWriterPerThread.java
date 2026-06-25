@@ -141,7 +141,10 @@ final class DocumentsWriterPerThread implements Accountable, Lock {
   private int numDeletedDocIds = 0;
   private final IndexingChain.ReservedField<NumericDocValuesField> parentField;
 
+  final long bucket;
+
   DocumentsWriterPerThread(
+      long bucket,
       int indexMajorVersionCreated,
       String segmentName,
       Directory directoryOrig,
@@ -151,6 +154,7 @@ final class DocumentsWriterPerThread implements Accountable, Lock {
       FieldInfos.Builder fieldInfos,
       AtomicLong pendingNumDocs,
       boolean enableTestPoints) {
+    this.bucket = bucket;
     this.directory = new TrackingDirectoryWrapper(directory);
     this.fieldInfos = fieldInfos;
     this.indexWriterConfig = indexWriterConfig;

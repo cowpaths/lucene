@@ -18,8 +18,19 @@ package org.apache.lucene.index;
 
 import java.io.IOException;
 import java.io.Reader;
+import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Future;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import org.apache.lucene.analysis.Analyzer;
 import org.apache.lucene.analysis.TokenFilter;
@@ -35,6 +46,7 @@ import org.apache.lucene.document.Field.Store;
 import org.apache.lucene.document.FieldType;
 import org.apache.lucene.document.IntPoint;
 import org.apache.lucene.document.InvertableType;
+import org.apache.lucene.document.LongPoint;
 import org.apache.lucene.document.KnnFloatVectorField;
 import org.apache.lucene.document.NumericDocValuesField;
 import org.apache.lucene.document.SortedDocValuesField;
@@ -53,12 +65,21 @@ import org.apache.lucene.tests.index.DocHelper;
 import org.apache.lucene.tests.util.LuceneTestCase;
 import org.apache.lucene.tests.util.TestUtil;
 import org.apache.lucene.util.AttributeSource;
+import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.BytesRef;
+import org.apache.lucene.util.NamedThreadFactory;
 import org.apache.lucene.util.Version;
 import org.hamcrest.MatcherAssert;
 import org.hamcrest.Matchers;
+import org.junit.Assume;
 
 public class TestDocumentWriter extends LuceneTestCase {
+
+  private static final String ROUTING_TEMPORAL_FIELD = "ts";
+  private static final String ROUTING_ADJUST_NOW_STR = "2023-11-14T22:13:20.000Z";
+  private static final long ROUTING_ADJUST_NOW_MILLIS =
+      Instant.parse(ROUTING_ADJUST_NOW_STR).toEpochMilli();
+
   private Directory dir;
 
   @Override
@@ -603,6 +624,170 @@ public class TestDocumentWriter extends LuceneTestCase {
           assertNull(leafReader.termVectors().get(0));
         }
       }
+    }
+  }
+
+  /**
+   * Test that updateDocument properly handle concurrent new and update documents that routes to
+   * different buckets based on a temporal field.
+   */
+  public void testUpdateDocumentRouting() throws Exception {
+    try {
+      SegmentRoutingUtil.setProperties(ROUTING_TEMPORAL_FIELD);
+      SegmentRoutingUtil.initBaseTime(ROUTING_ADJUST_NOW_STR);
+
+      Document probe = newRoutingDoc("probe", ROUTING_ADJUST_NOW_MILLIS);
+      long bucketViaDoc = SegmentRoutingUtil.mapToBucket(probe);
+      long bucketViaTs =
+              MergePolicy.mapToBucket(ROUTING_ADJUST_NOW_MILLIS, ROUTING_ADJUST_NOW_MILLIS);
+      Assume.assumeTrue(
+              "SegmentRoutingUtil must read field "
+                      + ROUTING_TEMPORAL_FIELD
+                      + " (JVM must load SegmentRoutingUtil after lucene.temporalField.name is set)",
+              bucketViaDoc == bucketViaTs);
+
+      final int docCount = 30;
+      final int updateCount = 10;
+      final int threadCount = atLeast(4);
+
+      Map<String, Long> expectedIdToTsMillis = new ConcurrentHashMap<>();
+      ExecutorService service =
+              new ThreadPoolExecutor(
+                      threadCount,
+                      threadCount,
+                      0L,
+                      TimeUnit.MILLISECONDS,
+                      new LinkedBlockingQueue<Runnable>(),
+                      new NamedThreadFactory("TestUpdateDocumentRouting"));
+      List<Future<?>> futures = new ArrayList<>();
+
+      IndexWriterConfig iwc =
+              newIndexWriterConfig(new MockAnalyzer(random()))
+                      .setMergePolicy(NoMergePolicy.INSTANCE)
+                      .setRAMBufferSizeMB(0.25);
+
+      try (IndexWriter writer = new IndexWriter(dir, iwc)) {
+        for (int i = 0; i < docCount; i++) {
+          final String id = Integer.toString(i);
+          final long ts = tsForBucketIndex(i % 3);
+          futures.add(
+                  service.submit(
+                          () -> {
+                            try {
+                              writer.addDocument(newRoutingDoc(id, ts));
+                            } catch (IOException e) {
+                              throw new RuntimeException(e);
+                            }
+                            expectedIdToTsMillis.put(id, ts);
+                          }));
+        }
+        for (Future<?> f : futures) {
+          f.get();
+        }
+        futures.clear();
+
+        for (int i = 0; i < updateCount; i++) {
+          final String id = Integer.toString(i);
+          final long ts =
+                  tsForBucketIndex(
+                          (i + 1)
+                                  % 3); // update to a different bucket tier than original doc to test that
+          // updateDocument moves doc to new correct bucket/leaf
+          futures.add(
+                  service.submit(
+                          () -> {
+                            try {
+                              writer.updateDocument(new Term("id", id), newRoutingDoc(id, ts));
+                            } catch (IOException e) {
+                              throw new RuntimeException(e);
+                            }
+                            expectedIdToTsMillis.put(id, ts);
+                          }));
+        }
+        for (Future<?> f : futures) {
+          f.get();
+        }
+
+        writer.flush();
+        writer.commit();
+      } finally {
+        TestUtil.shutdownExecutorService(service);
+      }
+
+      try (DirectoryReader reader = DirectoryReader.open(dir)) {
+        assertEquals(docCount, reader.numDocs());
+
+        Map<String, Long> observedIdToTsMillis = new HashMap<>();
+        Set<Long> bucketsWithLiveDocs = new HashSet<>();
+        for (LeafReaderContext ctx : reader.leaves()) {
+          LeafReader leaf = ctx.reader();
+          Set<Long> bucketsInLeaf = new HashSet<>();
+          Bits liveDocs = leaf.getLiveDocs();
+          for (int docID = 0; docID < leaf.maxDoc(); docID++) {
+            if (liveDocs != null && !liveDocs.get(docID)) {
+              continue;
+            }
+            Document doc = leaf.storedFields().document(docID);
+            String id = doc.get("id");
+            IndexableField tsField = doc.getField(ROUTING_TEMPORAL_FIELD);
+            assertNotNull(tsField);
+            long ts = tsField.numericValue().longValue();
+            long bucket = MergePolicy.mapToBucket(ts, ROUTING_ADJUST_NOW_MILLIS);
+            bucketsInLeaf.add(bucket);
+
+            Long prior = observedIdToTsMillis.put(id, ts);
+            assertNull("duplicate live doc id=" + id, prior);
+
+            assertEquals(
+                "stored ts value does not match expected for id=" + id,
+                expectedIdToTsMillis.get(id).longValue(),
+                ts);
+            assertEquals(
+                "doc id=" + id + " in unexpected temporal bucket/leaf",
+                MergePolicy.mapToBucket(expectedIdToTsMillis.get(id), ROUTING_ADJUST_NOW_MILLIS),
+                bucket);
+          }
+          if (bucketsInLeaf.isEmpty()) {
+            continue;
+          }
+          assertEquals(
+              "each leaf/segment with live docs must contain only one temporal routing bucket, got "
+                  + bucketsInLeaf
+                  + " in "
+                  + leaf,
+              1,
+              bucketsInLeaf.size());
+          bucketsWithLiveDocs.add(bucketsInLeaf.iterator().next());
+        }
+        assertEquals(
+                "expected one live segment/leaf per temporal bucket tier used in this test",
+                3,
+                bucketsWithLiveDocs.size());
+        assertEquals(docCount, observedIdToTsMillis.size());
+      }
+    } finally {
+      // clear properties so they don't affect other tests
+      SegmentRoutingUtil.setProperties(null);
+      SegmentRoutingUtil.initBaseTime(null);
+    }
+  }
+
+  private static Document newRoutingDoc(String id, long tsMillis) {
+    Document doc = new Document();
+    doc.add(new StringField("id", id, Field.Store.YES));
+    doc.add(new LongPoint(ROUTING_TEMPORAL_FIELD, tsMillis));
+    doc.add(new StoredField(ROUTING_TEMPORAL_FIELD, tsMillis));
+    return doc;
+  }
+
+  private static long tsForBucketIndex(int bucketIndex) {
+    switch (bucketIndex) {
+      case 0:
+        return ROUTING_ADJUST_NOW_MILLIS;
+      case 1:
+        return ROUTING_ADJUST_NOW_MILLIS - TimeUnit.DAYS.toMillis(5);
+      default:
+        return ROUTING_ADJUST_NOW_MILLIS - TimeUnit.DAYS.toMillis(20);
     }
   }
 }

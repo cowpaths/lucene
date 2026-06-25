@@ -940,4 +940,8 @@ public abstract class MergePolicy {
       this.hardLiveDocs = hardLiveDocs;
     }
   }
+
+  public static long mapToBucket(long timestampMillis, long nowMillis) {
+    return SegmentRoutingUtil.mapToBucket(timestampMillis, nowMillis);
+  }
 }
