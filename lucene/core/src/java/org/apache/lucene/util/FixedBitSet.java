@@ -18,7 +18,6 @@ package org.apache.lucene.util;
 
 import java.io.IOException;
 import java.util.Arrays;
-import java.util.stream.Collectors;
 import org.apache.lucene.search.DocIdSet;
 import org.apache.lucene.search.DocIdSetIterator;
 import org.apache.lucene.store.DataOutput;
@@ -71,7 +70,7 @@ public final class FixedBitSet extends BitSet {
     } else {
       try {
         maxWordsShift = Integer.parseInt(tmp);
-      } catch (Exception e) {
+      } catch (@SuppressWarnings("unused") Exception e) {
         maxWordsShift = DEFAULT_MAX_WORDS_SHIFT;
       }
     }
