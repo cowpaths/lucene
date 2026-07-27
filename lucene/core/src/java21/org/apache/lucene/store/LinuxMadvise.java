@@ -67,7 +67,6 @@ final class LinuxMadvise implements BlockCacheMmapProvider {
 
   // madvise advice values (used by Mapping)
   private static final int MADV_WILLNEED = 3;
-  private static final int MADV_DONTNEED = 4;
   private static final int MADV_COLD = 20;
 
   // msync flags
@@ -360,11 +359,6 @@ final class LinuxMadvise implements BlockCacheMmapProvider {
     @Override
     public void release(int blockIdx) {
       madvise(blockIdx, MADV_COLD);
-    }
-
-    @Override
-    public void drop(int blockIdx) {
-      madvise(blockIdx, MADV_DONTNEED);
     }
 
     @Override

@@ -57,12 +57,6 @@ public interface BlockCacheMapping extends Closeable {
   default void release(int blockIdx) {}
 
   /**
-   * Hints that block {@code blockIdx} is no longer needed ({@code MADV_DONTNEED}). No-op in the
-   * default implementation.
-   */
-  default void drop(int blockIdx) {}
-
-  /**
    * Forces all mapped data pages to the underlying storage device. Covers the data region only;
    * call {@link #forceMetaBuf} separately for metadata writeback.
    */
