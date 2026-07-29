@@ -235,7 +235,7 @@ final class LinuxMadvise implements BlockCacheMmapProvider {
     @Override
     public void force() throws IOException {
       try {
-        MemorySegment addr = MemorySegment.ofAddress(base).reinterpret(dataSize);
+        MemorySegment addr = MemorySegment.ofAddress(base);
         int ret = (int) MH$msync.invokeExact(addr, dataSize, MS_SYNC);
         if (ret != 0) {
           throw new IOException(
@@ -258,8 +258,7 @@ final class LinuxMadvise implements BlockCacheMmapProvider {
 
     private void madvise(int blockIdx, int advice) {
       try {
-        long address = base + (long) blockIdx * blockSize;
-        MemorySegment addr = MemorySegment.ofAddress(address).reinterpret(blockSize);
+        MemorySegment addr = MemorySegment.ofAddress(base + (long) blockIdx * blockSize);
         int ret = (int) MH$madvise.invokeExact(addr, (long) blockSize, advice);
         if (ret != 0) {
           LOG.fine(
