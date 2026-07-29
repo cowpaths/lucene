@@ -52,9 +52,9 @@ final class LinuxMadvise implements BlockCacheMmapProvider {
   private static final boolean AVAILABLE;
 
   // madvise advice values (used by Mapping)
-  static final int MADV_WILLNEED = 3;
-  static final int MADV_COLD = 20;
-  static final int MADV_REMOVE = 9;
+  private static final int MADV_WILLNEED = 3;
+  private static final int MADV_COLD = 20;
+  private static final int MADV_REMOVE = 9;
 
   // msync flags
   private static final int MS_SYNC = 4;
