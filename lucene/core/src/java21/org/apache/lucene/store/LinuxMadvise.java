@@ -18,6 +18,7 @@ package org.apache.lucene.store;
 
 import java.io.IOException;
 import java.lang.foreign.Arena;
+import java.util.concurrent.atomic.AtomicLong;
 import java.lang.foreign.FunctionDescriptor;
 import java.lang.foreign.Linker;
 import java.lang.foreign.MemorySegment;
@@ -202,6 +203,7 @@ final class LinuxMadvise implements BlockCacheMmapProvider {
     private final long dataSize;
     private final ByteBuffer[] pool;
     private final boolean removeSupported;
+    private final AtomicLong prepareWriteCount = new AtomicLong();
 
     Mapping(Arena arena, long base, int blockSize, long dataSize, ByteBuffer[] pool, boolean removeSupported) {
       this.arena = arena;
@@ -229,7 +231,12 @@ final class LinuxMadvise implements BlockCacheMmapProvider {
 
     @Override
     public void prepareWrite(int blockIdx) {
-      madvise(blockIdx, removeSupported ? MADV_REMOVE : MADV_WILLNEED);
+      int advice = removeSupported ? MADV_REMOVE : MADV_WILLNEED;
+      long n = prepareWriteCount.incrementAndGet();
+      if (n == 1 || n % 1000 == 0) {
+        LOG.info(String.format(Locale.ENGLISH, "prepareWrite #%d blockIdx=%d advice=%d (removeSupported=%b)", n, blockIdx, advice, removeSupported));
+      }
+      madvise(blockIdx, advice);
     }
 
     @Override
@@ -261,12 +268,11 @@ final class LinuxMadvise implements BlockCacheMmapProvider {
         MemorySegment addr = MemorySegment.ofAddress(base + (long) blockIdx * blockSize);
         int ret = (int) MH$madvise.invokeExact(addr, (long) blockSize, advice);
         if (ret != 0) {
-          LOG.fine(
-              () ->
-                  String.format(
-                      Locale.ENGLISH,
-                      "madvise(blockIdx=%d, advice=%d) returned %d",
-                      blockIdx, advice, ret));
+          LOG.info(
+              String.format(
+                  Locale.ENGLISH,
+                  "madvise(blockIdx=%d, advice=%d) returned %d",
+                  blockIdx, advice, ret));
         }
       } catch (Throwable t) {
         throw new AssertionError(t);
