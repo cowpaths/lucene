@@ -47,6 +47,15 @@ public interface BlockCacheMapping extends Closeable {
    */
   default void release(int blockIdx) {}
 
+  /**
+   * Called before overwriting block {@code blockIdx} with new data. Attempts {@code MADV_REMOVE}
+   * to punch a hole in the backing file so the kernel zero-fills on the next fault rather than
+   * reading stale data from disk. Falls back to {@code MADV_WILLNEED} (coalesces the
+   * read-before-write into a single large I/O) if {@code MADV_REMOVE} is unsupported. No-op in
+   * the default implementation.
+   */
+  default void prepareWrite(int blockIdx) {}
+
   /** Forces all mapped data pages to the underlying storage device. */
   void force() throws IOException;
 

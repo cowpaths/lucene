@@ -20,10 +20,13 @@ import java.io.IOException;
 import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
 import java.lang.foreign.Linker;
+import java.lang.foreign.MemoryLayout;
 import java.lang.foreign.MemorySegment;
+import java.lang.foreign.StructLayout;
 import java.lang.foreign.SymbolLookup;
 import java.lang.foreign.ValueLayout;
 import java.lang.invoke.MethodHandle;
+import java.lang.invoke.VarHandle;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileChannel.MapMode;
@@ -50,31 +53,45 @@ final class LinuxMadvise implements BlockCacheMmapProvider {
 
   // --- shared (class-level) method handles ---
   private static final MethodHandle MH$madvise;
+  private static final MethodHandle MH$madviseCapture; // captures errno
   private static final MethodHandle MH$msync;
+  private static final StructLayout CAPTURE_LAYOUT;
+  private static final VarHandle ERRNO_HANDLE;
   private static final boolean AVAILABLE;
 
   // madvise advice values (used by Mapping)
   private static final int MADV_WILLNEED = 3;
   private static final int MADV_COLD = 20;
+  private static final int MADV_REMOVE = 9;
 
   // msync flags
   private static final int MS_SYNC = 4;
 
+  // errno values that indicate MADV_REMOVE is permanently unsupported
+  private static final int EPERM  = 1;
+  private static final int EINVAL = 22;
+  private static final int ENOSYS = 38;
+
   private LinuxMadvise() {}
 
   static {
-    MethodHandle advise = null, sync = null;
+    MethodHandle advise = null, adviseCapture = null, sync = null;
+    StructLayout captureLayout = null;
+    VarHandle errnoHandle = null;
     boolean available = false;
     if (Constants.LINUX) {
       try {
         Linker linker = Linker.nativeLinker();
         SymbolLookup stdlib = linker.defaultLookup();
-        advise =
-            findFunction(
-                linker, stdlib, "madvise",
-                FunctionDescriptor.of(
-                    ValueLayout.JAVA_INT,
-                    ValueLayout.ADDRESS, ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT));
+        FunctionDescriptor madviseDesc =
+            FunctionDescriptor.of(
+                ValueLayout.JAVA_INT,
+                ValueLayout.ADDRESS, ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT);
+        advise = findFunction(linker, stdlib, "madvise", madviseDesc);
+        captureLayout = MemoryLayout.structLayout(ValueLayout.JAVA_INT.withName("errno"));
+        errnoHandle = captureLayout.varHandle(MemoryLayout.PathElement.groupElement("errno"));
+        adviseCapture = findFunction(
+            linker, stdlib, "madvise", madviseDesc, Linker.Option.captureCallState("errno"));
         sync =
             findFunction(
                 linker, stdlib, "msync",
@@ -97,7 +114,10 @@ final class LinuxMadvise implements BlockCacheMmapProvider {
       }
     }
     MH$madvise = advise;
+    MH$madviseCapture = adviseCapture;
     MH$msync = sync;
+    CAPTURE_LAYOUT = captureLayout;
+    ERRNO_HANDLE = errnoHandle;
     AVAILABLE = available;
   }
 
@@ -175,6 +195,8 @@ final class LinuxMadvise implements BlockCacheMmapProvider {
     private final int blockSize;
     private final long dataSize;
     private final ByteBuffer[] pool;
+    // 0 = try MADV_REMOVE; non-zero = errno of permanent failure, fall back to MADV_WILLNEED
+    private volatile int removeErrno = 0;
 
     Mapping(Arena arena, long base, int blockSize, long dataSize, ByteBuffer[] pool) {
       this.arena = arena;
@@ -197,6 +219,37 @@ final class LinuxMadvise implements BlockCacheMmapProvider {
     @Override
     public void release(int blockIdx) {
       madvise(blockIdx, MADV_COLD);
+    }
+
+    @Override
+    public void prepareWrite(int blockIdx) {
+      if (removeErrno == 0) {
+        try (Arena arena = Arena.ofConfined()) {
+          MemorySegment cap = arena.allocate(CAPTURE_LAYOUT);
+          long address = base + (long) blockIdx * blockSize;
+          MemorySegment addr = MemorySegment.ofAddress(address).reinterpret(blockSize);
+          try {
+            int ret = (int) MH$madviseCapture.invokeExact(cap, addr, (long) blockSize, MADV_REMOVE);
+            if (ret == 0) return;
+          } catch (Throwable t) {
+            throw new AssertionError(t);
+          }
+          int err = (int) ERRNO_HANDLE.get(cap, 0L);
+          switch (err) {
+            case EPERM:
+            case EINVAL:
+            case ENOSYS:
+              removeErrno = err;
+              LOG.warning(
+                  "MADV_REMOVE permanently unsupported (errno=" + err
+                      + "); falling back to MADV_WILLNEED for prepareWrite");
+              break;
+            default:
+              LOG.fine(() -> "MADV_REMOVE transient failure (errno=" + err + "); will retry");
+          }
+        }
+      }
+      madvise(blockIdx, MADV_WILLNEED);
     }
 
     @Override
