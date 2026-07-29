@@ -90,7 +90,7 @@ final class LinuxMadvise implements BlockCacheMmapProvider {
   }
 
   /** Returns a fresh {@link BlockCacheMmapProvider} factory instance, or empty if unavailable. */
-  static Optional<BlockCacheMmapProvider> getInstance() {
+  public static Optional<BlockCacheMmapProvider> getInstance() {
     if (!AVAILABLE) return Optional.empty();
     return Optional.of(new LinuxMadvise());
   }
