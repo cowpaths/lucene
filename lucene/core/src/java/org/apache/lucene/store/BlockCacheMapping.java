@@ -36,25 +36,25 @@ public interface BlockCacheMapping extends Closeable {
   ByteBuffer[] dataPool();
 
   /**
-   * Hints that block {@code blockIdx} will be needed soon ({@code MADV_WILLNEED}). No-op in the
-   * default implementation.
+   * Hints that block {@code blockIdx} will be needed soon ({@code MADV_WILLNEED}). Returns the
+   * syscall return value (0 = success), or 0 in the default no-op implementation.
    */
-  default void loadHint(int blockIdx) {}
+  default int loadHint(int blockIdx) { return 0; }
 
   /**
-   * Hints that block {@code blockIdx} is unlikely to be needed soon ({@code MADV_COLD}). No-op in
-   * the default implementation.
+   * Hints that block {@code blockIdx} is unlikely to be needed soon ({@code MADV_COLD}). Returns
+   * the syscall return value (0 = success), or 0 in the default no-op implementation.
    */
-  default void release(int blockIdx) {}
+  default int release(int blockIdx) { return 0; }
 
   /**
    * Called before overwriting block {@code blockIdx} with new data. Attempts {@code MADV_REMOVE}
    * to punch a hole in the backing file so the kernel zero-fills on the next fault rather than
    * reading stale data from disk. Falls back to {@code MADV_WILLNEED} (coalesces the
-   * read-before-write into a single large I/O) if {@code MADV_REMOVE} is unsupported. No-op in
-   * the default implementation.
+   * read-before-write into a single large I/O) if {@code MADV_REMOVE} is unsupported. Returns the
+   * syscall return value (0 = success), or 0 in the default no-op implementation.
    */
-  default void prepareWrite(int blockIdx) {}
+  default int prepareWrite(int blockIdx) { return 0; }
 
   /** Forces all mapped data pages to the underlying storage device. */
   void force() throws IOException;

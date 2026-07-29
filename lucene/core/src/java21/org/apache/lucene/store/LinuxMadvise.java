@@ -18,22 +18,20 @@ package org.apache.lucene.store;
 
 import java.io.IOException;
 import java.lang.foreign.Arena;
-import java.util.concurrent.atomic.AtomicLong;
 import java.lang.foreign.FunctionDescriptor;
 import java.lang.foreign.Linker;
 import java.lang.foreign.MemorySegment;
 import java.lang.foreign.SymbolLookup;
 import java.lang.foreign.ValueLayout;
 import java.lang.invoke.MethodHandle;
-import java.nio.file.Files;
 import java.nio.ByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileChannel.MapMode;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.Locale;
 import java.util.Optional;
-import java.util.logging.Logger;
 import org.apache.lucene.util.Constants;
 
 /**
@@ -48,17 +46,15 @@ import org.apache.lucene.util.Constants;
 @SuppressWarnings("preview")
 final class LinuxMadvise implements BlockCacheMmapProvider {
 
-  private static final Logger LOG = Logger.getLogger(LinuxMadvise.class.getName());
-
   // --- shared (class-level) method handles ---
   private static final MethodHandle MH$madvise;
   private static final MethodHandle MH$msync;
   private static final boolean AVAILABLE;
 
   // madvise advice values (used by Mapping)
-  private static final int MADV_WILLNEED = 3;
-  private static final int MADV_COLD = 20;
-  private static final int MADV_REMOVE = 9;
+  static final int MADV_WILLNEED = 3;
+  static final int MADV_COLD = 20;
+  static final int MADV_REMOVE = 9;
 
   // msync flags
   private static final int MS_SYNC = 4;
@@ -85,18 +81,7 @@ final class LinuxMadvise implements BlockCacheMmapProvider {
                     ValueLayout.JAVA_INT,
                     ValueLayout.ADDRESS, ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT));
         available = true;
-        LOG.info("LinuxMadvise: native madvise/msync available");
-      } catch (UnsupportedOperationException uoe) {
-        LOG.warning("LinuxMadvise unavailable: " + uoe.getMessage());
-      } catch (
-          @SuppressWarnings("unused")
-          IllegalCallerException ice) {
-        LOG.warning(
-            String.format(
-                Locale.ENGLISH,
-                "LinuxMadvise requires native access; pass: --enable-native-access=%s",
-                Optional.ofNullable(LinuxMadvise.class.getModule().getName())
-                    .orElse("ALL-UNNAMED")));
+      } catch (UnsupportedOperationException | IllegalCallerException ignored) {
       }
     }
     MH$madvise = advise;
@@ -150,14 +135,12 @@ final class LinuxMadvise implements BlockCacheMmapProvider {
           fc.truncate(blockSize);
           MemorySegment seg = fc.map(MapMode.READ_WRITE, 0L, blockSize, arena);
           int ret = (int) MH$madvise.invokeExact(seg, (long) blockSize, MADV_REMOVE);
-          if (ret != 0) LOG.info("MADV_REMOVE probe returned " + ret + "; falling back to MADV_WILLNEED for prepareWrite");
           return ret == 0;
         }
       } finally {
         Files.delete(tmp);
       }
     } catch (Throwable t) {
-      LOG.info("MADV_REMOVE probe failed (" + t + "); falling back to MADV_WILLNEED for prepareWrite");
       return false;
     }
   }
@@ -195,15 +178,14 @@ final class LinuxMadvise implements BlockCacheMmapProvider {
   // --- Mapping: fully-initialized, immutable; final fields ---
 
   @SuppressWarnings({"preview", "restricted"})
-  private static final class Mapping implements BlockCacheMapping {
+  static final class Mapping implements BlockCacheMapping {
 
     private final Arena arena;
     private final long base;
     private final int blockSize;
     private final long dataSize;
     private final ByteBuffer[] pool;
-    private final boolean removeSupported;
-    private final AtomicLong prepareWriteCount = new AtomicLong();
+    final boolean removeSupported;
 
     Mapping(Arena arena, long base, int blockSize, long dataSize, ByteBuffer[] pool, boolean removeSupported) {
       this.arena = arena;
@@ -220,23 +202,18 @@ final class LinuxMadvise implements BlockCacheMmapProvider {
     }
 
     @Override
-    public void loadHint(int blockIdx) {
-      madvise(blockIdx, MADV_WILLNEED);
+    public int loadHint(int blockIdx) {
+      return madvise(blockIdx, MADV_WILLNEED);
     }
 
     @Override
-    public void release(int blockIdx) {
-      madvise(blockIdx, MADV_COLD);
+    public int release(int blockIdx) {
+      return madvise(blockIdx, MADV_COLD);
     }
 
     @Override
-    public void prepareWrite(int blockIdx) {
-      int advice = removeSupported ? MADV_REMOVE : MADV_WILLNEED;
-      long n = prepareWriteCount.incrementAndGet();
-      if (n == 1 || n % 1000 == 0) {
-        LOG.info(String.format(Locale.ENGLISH, "prepareWrite #%d blockIdx=%d advice=%d (removeSupported=%b)", n, blockIdx, advice, removeSupported));
-      }
-      madvise(blockIdx, advice);
+    public int prepareWrite(int blockIdx) {
+      return madvise(blockIdx, removeSupported ? MADV_REMOVE : MADV_WILLNEED);
     }
 
     @Override
@@ -263,17 +240,18 @@ final class LinuxMadvise implements BlockCacheMmapProvider {
       arena.close();
     }
 
-    private void madvise(int blockIdx, int advice) {
+    @Override
+    public String toString() {
+      return String.format(
+          Locale.ENGLISH,
+          "LinuxMadvise.Mapping[base=0x%016X, blockSize=%d, dataSize=%d, removeSupported=%b]",
+          base, blockSize, dataSize, removeSupported);
+    }
+
+    private int madvise(int blockIdx, int advice) {
       try {
         MemorySegment addr = MemorySegment.ofAddress(base + (long) blockIdx * blockSize);
-        int ret = (int) MH$madvise.invokeExact(addr, (long) blockSize, advice);
-        if (ret != 0) {
-          LOG.info(
-              String.format(
-                  Locale.ENGLISH,
-                  "madvise(blockIdx=%d, advice=%d) returned %d",
-                  blockIdx, advice, ret));
-        }
+        return (int) MH$madvise.invokeExact(addr, (long) blockSize, advice);
       } catch (Throwable t) {
         throw new AssertionError(t);
       }

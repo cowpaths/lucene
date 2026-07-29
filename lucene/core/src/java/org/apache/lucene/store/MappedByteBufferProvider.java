@@ -83,6 +83,11 @@ final class MappedByteBufferProvider implements BlockCacheMmapProvider {
       for (MappedByteBuffer bb : pool) bb.force();
     }
 
+    @Override
+    public String toString() {
+      return "MappedByteBufferProvider.Mapping[partitions=" + pool.length + "]";
+    }
+
     // MappedByteBuffers are released by the GC; no explicit unmap needed.
     @Override
     public void close() {}
