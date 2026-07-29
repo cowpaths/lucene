@@ -27,22 +27,13 @@ import java.nio.ByteBuffer;
  * region.
  *
  * <p>Lifecycle: one of the {@link BlockCacheMmapProvider} {@code open} methods constructs an
- * instance and populates all state. Hint calls, {@link #force}, {@link #forceMetaBuf}, and {@link
- * #close} operate on the immutable retained state.
+ * instance and populates all state. Hint calls, {@link #force}, and {@link #close} operate on
+ * the immutable retained state.
  */
 public interface BlockCacheMapping extends Closeable {
 
-  /** Number of cache blocks in the data region. */
-  int nBlocks();
-
   /** Data pool, indexed by partition. Always non-null after construction. */
   ByteBuffer[] dataPool();
-
-  /**
-   * Metadata + trailer buffer, non-null for persistent caches (created via {@link
-   * BlockCacheMmapProvider#open}); {@code null} for ephemeral caches.
-   */
-  ByteBuffer metaBuf();
 
   /**
    * Hints that block {@code blockIdx} will be needed soon ({@code MADV_WILLNEED}). No-op in the
@@ -56,17 +47,8 @@ public interface BlockCacheMapping extends Closeable {
    */
   default void release(int blockIdx) {}
 
-  /**
-   * Forces all mapped data pages to the underlying storage device. Covers the data region only;
-   * call {@link #forceMetaBuf} separately for metadata writeback.
-   */
+  /** Forces all mapped data pages to the underlying storage device. */
   void force() throws IOException;
-
-  /**
-   * Forces the metadata + trailer region to the underlying storage device. No-op for ephemeral
-   * caches (where {@link #metaBuf()} is {@code null}) and in the default implementation.
-   */
-  default void forceMetaBuf() throws IOException {}
 
   /** Releases resources held by this mapping. No-op in the default implementation. */
   @Override

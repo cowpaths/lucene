@@ -27,34 +27,16 @@ import java.util.Optional;
  * contiguous native mmap). The returned {@link BlockCacheMapping} is fully initialized and
  * immutable.
  *
- * <p>The backing store layout is:
- *
- * <pre>
- *   [0, nBlocks * blockSize)                  — data region
- *   [nBlocks * blockSize, total)               — metadata + trailer
- * </pre>
- *
  * <p>Loaded reflectively by {@link #getDefault()} on Java 21+ Linux.
  */
 public interface BlockCacheMmapProvider {
 
   /**
-   * Opens an existing backing store (file or block device), infers {@code nBlocks} from its total
-   * size using the formula {@code (totalSize - trailerBytes) / (blockSize + metaBytesPerBlock)},
-   * and maps both the data and metadata regions.
-   *
-   * <p>{@link BlockCacheMapping#metaBuf()} will be non-null and ordered {@link
-   * java.nio.ByteOrder#LITTLE_ENDIAN} on the returned mapping.
+   * Maps the data region of a backing file, covering exactly {@code nBlocks * blockSize} bytes
+   * starting at offset 0. The caller is responsible for computing {@code nBlocks} and for mapping
+   * any metadata region separately.
    */
-  BlockCacheMapping open(Path path, int blockSize, int metaBytesPerBlock, int trailerBytes)
-      throws IOException;
-
-  /**
-   * Creates an ephemeral (non-persistent) backing file at {@code path}, sizes it to hold {@code
-   * targetBytes / blockSize} blocks of data, maps the data region only, then deletes the file.
-   * {@link BlockCacheMapping#metaBuf()} is {@code null} on the returned mapping.
-   */
-  BlockCacheMapping openEphemeral(Path path, int blockSize, long targetBytes) throws IOException;
+  BlockCacheMapping open(Path path, int blockSize, int nBlocks) throws IOException;
 
   /**
    * Returns a new provider instance appropriate for this platform. Attempts to load {@code

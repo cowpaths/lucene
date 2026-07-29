@@ -25,13 +25,10 @@ import java.lang.foreign.SymbolLookup;
 import java.lang.foreign.ValueLayout;
 import java.lang.invoke.MethodHandle;
 import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileChannel.MapMode;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
-import java.util.EnumSet;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.logging.Logger;
@@ -41,8 +38,8 @@ import org.apache.lucene.util.Constants;
  * Linux-specific {@link BlockCacheMmapProvider} using a single contiguous native mapping per
  * backing store, per-block {@code madvise} hints, and {@code msync} for writeback.
  *
- * <p>Each call to {@link #getInstance()} returns a fresh factory instance. {@link #open} and
- * {@link #openEphemeral} construct a fully-initialized {@link Mapping} with final fields.
+ * <p>Each call to {@link #getInstance()} returns a fresh factory instance. {@link #open}
+ * constructs a fully-initialized {@link Mapping} with final fields.
  *
  * <p>Loaded reflectively by {@link BlockCacheMmapProvider#getDefault()} on Java 21+ Linux.
  */
@@ -124,53 +121,20 @@ final class LinuxMadvise implements BlockCacheMmapProvider {
   // --- BlockCacheMmapProvider implementation ---
 
   @Override
-  public BlockCacheMapping open(Path path, int blockSize, int metaBytesPerBlock, int trailerBytes)
-      throws IOException {
-    long totalSize = Files.size(path);
-    long dataPerBlock = (long) blockSize + metaBytesPerBlock;
-    int nBlocks = Math.toIntExact((totalSize - trailerBytes) / dataPerBlock);
-    long ds = (long) nBlocks * blockSize;
-    long metaSize = (long) nBlocks * metaBytesPerBlock + trailerBytes;
+  public BlockCacheMapping open(Path path, int blockSize, int nBlocks) throws IOException {
+    long dataSize = (long) nBlocks * blockSize;
     Arena arena = Arena.ofShared();
     boolean success = false;
     try {
-      MemorySegment seg = mapStore(path, totalSize, arena);
+      MemorySegment seg = mapStore(path, dataSize, arena);
       ByteBuffer[] pool = buildPool(seg, nBlocks, blockSize);
-      ByteBuffer metaBuf =
-          seg.asSlice(ds, metaSize).asByteBuffer().order(ByteOrder.LITTLE_ENDIAN);
       success = true;
-      return new Mapping(nBlocks, arena, seg.address(), blockSize, ds, metaSize, pool, metaBuf);
+      return new Mapping(arena, seg.address(), blockSize, dataSize, pool);
     } finally {
       if (!success) arena.close();
     }
   }
 
-  @Override
-  public BlockCacheMapping openEphemeral(Path path, int blockSize, long targetBytes)
-      throws IOException {
-    int nBlocks = Math.toIntExact(targetBytes / blockSize);
-    long ds = (long) nBlocks * blockSize;
-    Arena arena = Arena.ofShared();
-    boolean success = false;
-    try {
-      try (FileChannel fc =
-          FileChannel.open(
-              path,
-              EnumSet.of(
-                  StandardOpenOption.CREATE_NEW,
-                  StandardOpenOption.READ,
-                  StandardOpenOption.WRITE))) {
-        fc.truncate(ds);
-        MemorySegment seg = fc.map(MapMode.READ_WRITE, 0L, ds, arena);
-        ByteBuffer[] pool = buildPool(seg, nBlocks, blockSize);
-        success = true;
-        return new Mapping(nBlocks, arena, seg.address(), blockSize, ds, 0L, pool, null);
-      }
-    } finally {
-      Files.delete(path);
-      if (!success) arena.close();
-    }
-  }
 
   // --- internal helpers (static; used by both the factory and the static inner Mapping) ---
 
@@ -206,47 +170,23 @@ final class LinuxMadvise implements BlockCacheMmapProvider {
   @SuppressWarnings({"preview", "restricted"})
   private static final class Mapping implements BlockCacheMapping {
 
-    private final int nBlocks;
     private final Arena arena;
     private final long base;
     private final int blockSize;
     private final long dataSize;
-    private final long metaSize; // 0 for ephemeral
     private final ByteBuffer[] pool;
-    private final ByteBuffer metaBuf; // null for ephemeral
 
-    Mapping(
-        int nBlocks,
-        Arena arena,
-        long base,
-        int blockSize,
-        long dataSize,
-        long metaSize,
-        ByteBuffer[] pool,
-        ByteBuffer metaBuf) {
-      this.nBlocks = nBlocks;
+    Mapping(Arena arena, long base, int blockSize, long dataSize, ByteBuffer[] pool) {
       this.arena = arena;
       this.base = base;
       this.blockSize = blockSize;
       this.dataSize = dataSize;
-      this.metaSize = metaSize;
       this.pool = pool;
-      this.metaBuf = metaBuf;
-    }
-
-    @Override
-    public int nBlocks() {
-      return nBlocks;
     }
 
     @Override
     public ByteBuffer[] dataPool() {
       return pool;
-    }
-
-    @Override
-    public ByteBuffer metaBuf() {
-      return metaBuf;
     }
 
     @Override
@@ -270,27 +210,6 @@ final class LinuxMadvise implements BlockCacheMmapProvider {
                   Locale.ENGLISH,
                   "msync(0x%08X, %d, MS_SYNC) failed with return code %d",
                   base, dataSize, ret));
-        }
-      } catch (IOException e) {
-        throw e;
-      } catch (Throwable t) {
-        throw new AssertionError(t);
-      }
-    }
-
-    @Override
-    public void forceMetaBuf() throws IOException {
-      if (metaSize == 0) return;
-      try {
-        long addr = base + dataSize;
-        MemorySegment segment = MemorySegment.ofAddress(addr).reinterpret(metaSize);
-        int ret = (int) MH$msync.invokeExact(segment, metaSize, MS_SYNC);
-        if (ret != 0) {
-          throw new IOException(
-              String.format(
-                  Locale.ENGLISH,
-                  "msync(meta, 0x%08X, %d, MS_SYNC) failed with return code %d",
-                  addr, metaSize, ret));
         }
       } catch (IOException e) {
         throw e;

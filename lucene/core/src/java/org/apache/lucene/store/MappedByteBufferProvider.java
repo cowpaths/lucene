@@ -18,14 +18,11 @@ package org.apache.lucene.store;
 
 import java.io.IOException;
 import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
 import java.nio.channels.FileChannel.MapMode;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
-import java.util.EnumSet;
 
 /**
  * Default {@link BlockCacheMmapProvider} backed by {@link MappedByteBuffer}. Maps the data region
@@ -36,41 +33,15 @@ import java.util.EnumSet;
 final class MappedByteBufferProvider implements BlockCacheMmapProvider {
 
   @Override
-  public BlockCacheMapping open(Path path, int blockSize, int metaBytesPerBlock, int trailerBytes)
-      throws IOException {
-    long fileSize = Files.size(path);
-    long dataPerBlock = (long) blockSize + metaBytesPerBlock;
-    int nBlocks = Math.toIntExact((fileSize - trailerBytes) / dataPerBlock);
+  public BlockCacheMapping open(Path path, int blockSize, int nBlocks) throws IOException {
     long dataSize = (long) nBlocks * blockSize;
-    long metaSize = (long) nBlocks * metaBytesPerBlock + trailerBytes;
     try (FileChannel fc =
         FileChannel.open(path, StandardOpenOption.READ, StandardOpenOption.WRITE)) {
       MappedByteBuffer[] pool = mapPartitions(fc, nBlocks, blockSize, dataSize);
-      MappedByteBuffer mb = fc.map(MapMode.READ_WRITE, dataSize, metaSize);
-      mb.order(ByteOrder.LITTLE_ENDIAN);
-      return new Mapping(nBlocks, pool, mb);
+      return new Mapping(pool);
     }
   }
 
-  @Override
-  public BlockCacheMapping openEphemeral(Path path, int blockSize, long targetBytes)
-      throws IOException {
-    int nBlocks = Math.toIntExact(targetBytes / blockSize);
-    long dataSize = (long) nBlocks * blockSize;
-    try (FileChannel fc =
-        FileChannel.open(
-            path,
-            EnumSet.of(
-                StandardOpenOption.CREATE_NEW,
-                StandardOpenOption.READ,
-                StandardOpenOption.WRITE))) {
-      fc.truncate(dataSize);
-      MappedByteBuffer[] pool = mapPartitions(fc, nBlocks, blockSize, dataSize);
-      return new Mapping(nBlocks, pool, null);
-    } finally {
-      Files.delete(path);
-    }
-  }
 
   private static MappedByteBuffer[] mapPartitions(
       FileChannel fc, int nBlocks, int blockSize, long dataSize) throws IOException {
@@ -96,19 +67,10 @@ final class MappedByteBufferProvider implements BlockCacheMmapProvider {
   }
 
   private static final class Mapping implements BlockCacheMapping {
-    private final int nBlocks;
     private final MappedByteBuffer[] pool;
-    private final MappedByteBuffer metaBuf; // null for ephemeral
 
-    Mapping(int nBlocks, MappedByteBuffer[] pool, MappedByteBuffer metaBuf) {
-      this.nBlocks = nBlocks;
+    Mapping(MappedByteBuffer[] pool) {
       this.pool = pool;
-      this.metaBuf = metaBuf;
-    }
-
-    @Override
-    public int nBlocks() {
-      return nBlocks;
     }
 
     @Override
@@ -117,18 +79,8 @@ final class MappedByteBufferProvider implements BlockCacheMmapProvider {
     }
 
     @Override
-    public ByteBuffer metaBuf() {
-      return metaBuf;
-    }
-
-    @Override
     public void force() throws IOException {
       for (MappedByteBuffer bb : pool) bb.force();
-    }
-
-    @Override
-    public void forceMetaBuf() throws IOException {
-      if (metaBuf != null) metaBuf.force();
     }
 
     // MappedByteBuffers are released by the GC; no explicit unmap needed.
