@@ -17,7 +17,6 @@
 package org.apache.lucene.store;
 
 import java.io.IOException;
-import java.io.RandomAccessFile;
 import java.lang.foreign.Arena;
 import java.lang.foreign.FunctionDescriptor;
 import java.lang.foreign.Linker;
@@ -40,11 +39,7 @@ import org.apache.lucene.util.Constants;
 
 /**
  * Linux-specific {@link BlockCacheMmapProvider} using a single contiguous native mapping per
- * backing store, per-block {@code madvise} hints, and {@code msync} for writeback. Supports both
- * filesystem files (via {@link FileChannel#map}) and raw block devices (via native {@code mmap}).
- *
- * <p>Block device size is queried via {@link RandomAccessFile#length()}, which uses {@code lseek}
- * and correctly returns the device size on Linux (JDK-8266610, fixed in JDK 17).
+ * backing store, per-block {@code madvise} hints, and {@code msync} for writeback.
  *
  * <p>Each call to {@link #getInstance()} returns a fresh factory instance. {@link #open} and
  * {@link #openEphemeral} construct a fully-initialized {@link Mapping} with final fields.
@@ -59,10 +54,6 @@ final class LinuxMadvise implements BlockCacheMmapProvider {
   // --- shared (class-level) method handles ---
   private static final MethodHandle MH$madvise;
   private static final MethodHandle MH$msync;
-  private static final MethodHandle MH$open;
-  private static final MethodHandle MH$mmap;
-  private static final MethodHandle MH$munmap;
-  private static final MethodHandle MH$close;
   private static final boolean AVAILABLE;
 
   // madvise advice values (used by Mapping)
@@ -72,17 +63,10 @@ final class LinuxMadvise implements BlockCacheMmapProvider {
   // msync flags
   private static final int MS_SYNC = 4;
 
-  // mmap constants
-  private static final int O_RDWR = 2;
-  private static final int PROT_READ = 1;
-  private static final int PROT_WRITE = 2;
-  private static final int MAP_SHARED = 1;
-  private static final long MAP_FAILED = -1L;
-
   private LinuxMadvise() {}
 
   static {
-    MethodHandle advise = null, sync = null, open = null, mmap = null, munmap = null, close = null;
+    MethodHandle advise = null, sync = null;
     boolean available = false;
     if (Constants.LINUX) {
       try {
@@ -100,30 +84,8 @@ final class LinuxMadvise implements BlockCacheMmapProvider {
                 FunctionDescriptor.of(
                     ValueLayout.JAVA_INT,
                     ValueLayout.ADDRESS, ValueLayout.JAVA_LONG, ValueLayout.JAVA_INT));
-        open =
-            findFunction(
-                linker, stdlib, "open",
-                FunctionDescriptor.of(
-                    ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_INT));
-        mmap =
-            findFunction(
-                linker, stdlib, "mmap",
-                FunctionDescriptor.of(
-                    ValueLayout.ADDRESS,
-                    ValueLayout.ADDRESS, ValueLayout.JAVA_LONG,
-                    ValueLayout.JAVA_INT, ValueLayout.JAVA_INT,
-                    ValueLayout.JAVA_INT, ValueLayout.JAVA_LONG));
-        munmap =
-            findFunction(
-                linker, stdlib, "munmap",
-                FunctionDescriptor.of(
-                    ValueLayout.JAVA_INT, ValueLayout.ADDRESS, ValueLayout.JAVA_LONG));
-        close =
-            findFunction(
-                linker, stdlib, "close",
-                FunctionDescriptor.of(ValueLayout.JAVA_INT, ValueLayout.JAVA_INT));
         available = true;
-        LOG.info("LinuxMadvise: native madvise/msync/mmap available");
+        LOG.info("LinuxMadvise: native madvise/msync available");
       } catch (UnsupportedOperationException uoe) {
         LOG.warning("LinuxMadvise unavailable: " + uoe.getMessage());
       } catch (
@@ -139,10 +101,6 @@ final class LinuxMadvise implements BlockCacheMmapProvider {
     }
     MH$madvise = advise;
     MH$msync = sync;
-    MH$open = open;
-    MH$mmap = mmap;
-    MH$munmap = munmap;
-    MH$close = close;
     AVAILABLE = available;
   }
 
@@ -168,7 +126,7 @@ final class LinuxMadvise implements BlockCacheMmapProvider {
   @Override
   public BlockCacheMapping open(Path path, int blockSize, int metaBytesPerBlock, int trailerBytes)
       throws IOException {
-    long totalSize = backingStoreSize(path);
+    long totalSize = Files.size(path);
     long dataPerBlock = (long) blockSize + metaBytesPerBlock;
     int nBlocks = Math.toIntExact((totalSize - trailerBytes) / dataPerBlock);
     long ds = (long) nBlocks * blockSize;
@@ -216,71 +174,11 @@ final class LinuxMadvise implements BlockCacheMmapProvider {
 
   // --- internal helpers (static; used by both the factory and the static inner Mapping) ---
 
-  /**
-   * Returns the byte size of the backing store. Works for both regular files and block devices:
-   * {@link RandomAccessFile#length()} uses {@code lseek(SEEK_END)}, which correctly returns the
-   * device size on Linux (JDK-8266610).
-   */
-  private static long backingStoreSize(Path path) throws IOException {
-    try (RandomAccessFile raf = new RandomAccessFile(path.toFile(), "r")) {
-      return raf.length();
-    }
-  }
-
-  /**
-   * Maps the entire backing store as a single contiguous {@link MemorySegment}. Uses {@link
-   * FileChannel#map} for regular files; native {@code mmap} for block devices (which {@link
-   * FileChannel#map} cannot handle as it relies on {@code fstat} for size validation).
-   */
   @SuppressWarnings("restricted")
   private static MemorySegment mapStore(Path path, long totalSize, Arena arena) throws IOException {
-    if (Files.isRegularFile(path)) {
-      try (FileChannel fc =
-          FileChannel.open(path, StandardOpenOption.READ, StandardOpenOption.WRITE)) {
-        return fc.map(MapMode.READ_WRITE, 0L, totalSize, arena);
-      }
-    }
-    // block device: native open + mmap; fd can be closed immediately after mmap
-    try {
-      int fd;
-      try (Arena tmp = Arena.ofConfined()) {
-        MemorySegment pathStr = tmp.allocateUtf8String(path.toString());
-        fd = (int) MH$open.invokeExact(pathStr, O_RDWR);
-      }
-      if (fd < 0) {
-        throw new IOException("open(" + path + ") failed");
-      }
-      MemorySegment mapped;
-      try {
-        MemorySegment result =
-            (MemorySegment)
-                MH$mmap.invokeExact(
-                    MemorySegment.NULL, totalSize,
-                    PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0L);
-        if (result.address() == MAP_FAILED) {
-          throw new IOException("mmap(" + path + ", " + totalSize + ") failed");
-        }
-        final long addr = result.address();
-        mapped =
-            MemorySegment.ofAddress(addr)
-                .reinterpret(
-                    totalSize,
-                    arena,
-                    seg -> {
-                      try {
-                        MH$munmap.invokeExact(seg, totalSize);
-                      } catch (Throwable t) {
-                        LOG.warning("munmap failed: " + t);
-                      }
-                    });
-      } finally {
-        MH$close.invokeExact(fd);
-      }
-      return mapped;
-    } catch (IOException e) {
-      throw e;
-    } catch (Throwable t) {
-      throw new AssertionError(t);
+    try (FileChannel fc =
+        FileChannel.open(path, StandardOpenOption.READ, StandardOpenOption.WRITE)) {
+      return fc.map(MapMode.READ_WRITE, 0L, totalSize, arena);
     }
   }
 
