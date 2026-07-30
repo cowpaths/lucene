@@ -206,8 +206,8 @@ final class LinuxMadvise implements BlockCacheMmapProvider {
       if (!removeSupported) return false;
       try {
         MemorySegment addr = MemorySegment.ofAddress(base);
-        MH$madvise.invokeExact(addr, dataSize, MADV_REMOVE);
-        return true;
+        int ret = (int) MH$madvise.invokeExact(addr, dataSize, MADV_REMOVE);
+        return ret == 0;
       } catch (Throwable t) {
         throw new AssertionError(t);
       }
