@@ -56,6 +56,15 @@ public interface BlockCacheMapping extends Closeable {
    */
   default int prepareWrite(int blockIdx) { return 0; }
 
+  /**
+   * Invalidates all mapped data pages, hinting to the kernel that the entire data region is stale
+   * and will be overwritten. Intended for cold-start scenarios where the backing file contains data
+   * from a prior run that should not be read before being overwritten. Returns {@code true} if the
+   * invalidation was actually performed (i.e. per-block {@link #prepareWrite} can be skipped for
+   * generation-0 slots during the initial fill), {@code false} if unsupported (no-op).
+   */
+  default boolean invalidateAll() { return false; }
+
   /** Forces all mapped data pages to the underlying storage device. */
   void force() throws IOException;
 
