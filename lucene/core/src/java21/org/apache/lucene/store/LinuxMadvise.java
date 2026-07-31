@@ -59,6 +59,14 @@ final class LinuxMadvise implements BlockCacheMmapProvider {
   // msync flags
   private static final int MS_SYNC = 4;
 
+  // set to prevent MADV_COLD upon releaseHint.
+  private static final boolean NO_MADV_COLD =
+      Boolean.getBoolean("org.apache.lucene.store.LinuxMadvise.noMadvCold");
+
+  // set to force MADV_WILLNEED instead of MADV_REMOVE for per-block prepareWrite
+  private static final boolean FORCE_WILLNEED =
+      Boolean.getBoolean("org.apache.lucene.store.LinuxMadvise.forceWillneed");
+
   private LinuxMadvise() {}
 
   static {
@@ -110,7 +118,7 @@ final class LinuxMadvise implements BlockCacheMmapProvider {
 
   @Override
   public BlockCacheMapping open(Path path, int blockSize, int nBlocks) throws IOException {
-    boolean removeSupported = probeRemove(path.getParent(), blockSize);
+    boolean removeSupported = !FORCE_WILLNEED && probeRemove(path.getParent(), blockSize);
     long dataSize = (long) nBlocks * blockSize;
     Arena arena = Arena.ofShared();
     boolean success = false;
@@ -220,6 +228,7 @@ final class LinuxMadvise implements BlockCacheMmapProvider {
 
     @Override
     public int release(int blockIdx) {
+      if (NO_MADV_COLD) return 0;
       return madvise(blockIdx, MADV_COLD);
     }
 
