@@ -49,7 +49,17 @@ public interface BlockCacheMmapProvider {
       Optional<BlockCacheMmapProvider> opt =
           (Optional<BlockCacheMmapProvider>) cls.getMethod("getInstance").invoke(null);
       if (opt.isPresent()) {
-        return opt.get();
+        BlockCacheMmapProvider candidate = opt.get();
+        MappedByteBufferProvider fallback = new MappedByteBufferProvider();
+        return (path, blockSize, nBlocks) -> {
+          try {
+            return candidate.open(path, blockSize, nBlocks);
+          } catch (UnsupportedOperationException e) {
+            // Arena-based mmap not supported on this filesystem (e.g. overlayfs/Docker);
+            // fall back to MappedByteBuffer partitions.
+            return fallback.open(path, blockSize, nBlocks);
+          }
+        };
       }
     } catch (@SuppressWarnings("unused") Exception ignored) {
     }
