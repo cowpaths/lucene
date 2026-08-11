@@ -56,6 +56,9 @@ final class LinuxMadvise implements BlockCacheMmapProvider {
   private static final int MADV_COLD = 20;
   private static final int MADV_REMOVE = 9;
 
+  // page alignment mask (4 KiB)
+  private static final long PAGE_MASK = 4096L - 1;
+
   // msync flags
   private static final int MS_SYNC = 4;
 
@@ -222,8 +225,8 @@ final class LinuxMadvise implements BlockCacheMmapProvider {
     }
 
     @Override
-    public int loadHint(int blockIdx) {
-      return madvise(blockIdx, MADV_WILLNEED);
+    public int loadHint(int blockIdx, int length) {
+      return madvise(blockIdx, MADV_WILLNEED, length);
     }
 
     @Override
@@ -270,9 +273,15 @@ final class LinuxMadvise implements BlockCacheMmapProvider {
     }
 
     private int madvise(int blockIdx, int advice) {
+      return madvise(blockIdx, advice, blockSize);
+    }
+
+    private int madvise(int blockIdx, int advice, int length) {
+      assert length > 0 && length <= blockSize : "length=" + length + ", blockSize=" + blockSize;
       try {
+        long aligned = ((long) length + PAGE_MASK) & ~PAGE_MASK;
         MemorySegment addr = MemorySegment.ofAddress(base + (long) blockIdx * blockSize);
-        return (int) MH$madvise.invokeExact(addr, (long) blockSize, advice);
+        return (int) MH$madvise.invokeExact(addr, aligned, advice);
       } catch (Throwable t) {
         throw new AssertionError(t);
       }
