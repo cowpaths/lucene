@@ -461,9 +461,15 @@ public class ConcurrentMergeScheduler extends MergeScheduler {
     try {
       sync();
     } finally {
-      if (intraMergeExecutor != null) {
-        intraMergeExecutor.shutdown();
-      }
+      shutdownIntraMergeExecutor();
+    }
+  }
+
+  /** Shuts down and clears the intra-merge executor. Visible to subclasses (e.g. GCMS). */
+  protected synchronized void shutdownIntraMergeExecutor() {
+    if (intraMergeExecutor != null) {
+      intraMergeExecutor.shutdown();
+      intraMergeExecutor = null;
     }
   }
 
