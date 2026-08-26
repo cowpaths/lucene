@@ -44,6 +44,20 @@ public interface BlockCacheMapping extends Closeable {
   default int loadHint(int blockIdx, int length) { return 0; }
 
   /**
+   * Issues {@code MADV_WILLNEED} on an arbitrary native address range, independent of the cache
+   * file block layout. Address and length need not be page-aligned; alignment is handled
+   * internally by the implementation. Returns the syscall return value (0 = success), or 0 in
+   * the default no-op implementation.
+   */
+  default int willneed(long address, long length) { return 0; }
+
+  /**
+   * Returns the native base address of a direct/mapped {@link ByteBuffer}. Returns 0 in the
+   * default no-op implementation.
+   */
+  default long baseAddress(ByteBuffer buf) { return 0; }
+
+  /**
    * Hints that block {@code blockIdx} is unlikely to be needed soon ({@code MADV_COLD}). Returns
    * the syscall return value (0 = success), or 0 in the default no-op implementation.
    */

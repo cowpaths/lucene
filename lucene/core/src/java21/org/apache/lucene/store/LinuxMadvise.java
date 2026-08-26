@@ -230,6 +230,23 @@ final class LinuxMadvise implements BlockCacheMmapProvider {
     }
 
     @Override
+    public int willneed(long address, long length) {
+      try {
+        long alignedAddr = address & ~PAGE_MASK;
+        long alignedLen = ((address + length + PAGE_MASK) & ~PAGE_MASK) - alignedAddr;
+        MemorySegment addr = MemorySegment.ofAddress(alignedAddr);
+        return (int) MH$madvise.invokeExact(addr, alignedLen, MADV_WILLNEED);
+      } catch (Throwable t) {
+        throw new AssertionError(t);
+      }
+    }
+
+    @Override
+    public long baseAddress(ByteBuffer buf) {
+      return MemorySegment.ofBuffer(buf).address();
+    }
+
+    @Override
     public int release(int blockIdx) {
       if (NO_MADV_COLD) return 0;
       return madvise(blockIdx, MADV_COLD);
