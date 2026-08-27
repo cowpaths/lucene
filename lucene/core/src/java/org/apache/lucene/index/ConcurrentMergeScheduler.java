@@ -378,6 +378,9 @@ public class ConcurrentMergeScheduler extends MergeScheduler {
         newMBPerSec = targetMBPerSec;
       }
 
+      // Subclasses (e.g. GlobalConcurrentMergeScheduler) may further restrict the rate.
+      newMBPerSec = adjustMergeRate(mergeThread, newMBPerSec);
+
       MergeRateLimiter rateLimiter = mergeThread.rateLimiter;
       double curMBPerSec = rateLimiter.getMBPerSec();
 
@@ -432,6 +435,18 @@ public class ConcurrentMergeScheduler extends MergeScheduler {
     }
   }
 
+  /**
+   * Hook for subclasses to further restrict (or leave unchanged) the merge IO rate chosen by {@link
+   * #updateMergeThreads()}. Returning {@code 0.0} pauses the merge thread.
+   *
+   * @param mergeThread the merge thread whose rate is being set
+   * @param proposedMBPerSec rate that this scheduler would apply before external constraints
+   * @return the rate to apply (may be {@code 0.0} to pause)
+   */
+  protected double adjustMergeRate(MergeThread mergeThread, double proposedMBPerSec) {
+    return proposedMBPerSec;
+  }
+
   private synchronized void initDynamicDefaults(Directory directory) throws IOException {
     if (maxThreadCount == AUTO_DETECT_MERGES_AND_THREADS) {
       setDefaultMaxMergesAndThreads(false);
@@ -461,15 +476,9 @@ public class ConcurrentMergeScheduler extends MergeScheduler {
     try {
       sync();
     } finally {
-      shutdownIntraMergeExecutor();
-    }
-  }
-
-  /** Shuts down and clears the intra-merge executor. Visible to subclasses (e.g. GCMS). */
-  protected synchronized void shutdownIntraMergeExecutor() {
-    if (intraMergeExecutor != null) {
-      intraMergeExecutor.shutdown();
-      intraMergeExecutor = null;
+      if (intraMergeExecutor != null) {
+        intraMergeExecutor.shutdown();
+      }
     }
   }
 

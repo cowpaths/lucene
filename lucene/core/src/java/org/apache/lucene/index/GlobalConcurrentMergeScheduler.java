@@ -17,131 +17,126 @@
 package org.apache.lucene.index;
 
 import java.io.IOException;
+import java.util.Objects;
 import org.apache.lucene.store.Directory;
 import org.apache.lucene.util.InfoStream;
 
 /**
- * A JVM-wide singleton {@link ConcurrentMergeScheduler}. All {@link IndexWriter}s that use this
- * scheduler share one merge-thread pool, so {@code maxThreadCount} / {@code maxMergeCount} cap
- * concurrent merges across the entire process rather than per core.
+ * Per-{@link IndexWriter} {@link ConcurrentMergeScheduler} that consults a shared {@link
+ * MergeConcurrencyGate} when assigning merge IO rates. The gate may force a merge thread to pause
+ * ({@code 0.0} MB/s) so that node-wide running-merge concurrency can be capped without sharing one
+ * CMS instance across cores.
  *
- * <p>Obtain the shared instance via {@link #getInstance()}. {@link IndexWriter} lifecycle is
- * refcounted: {@link #initialize} increments the active-writer count and {@link #close} decrements
- * it. Only the last writer's {@code close} tears down the pool; earlier closes are no-ops so other
- * cores can keep merging.
- *
- * <p>When one writer closes while others remain, {@link MergeTrigger#CLOSING} does not disable
- * global IO throttle (which would otherwise affect remaining writers).
+ * <p>Local {@code maxThreadCount}/{@code maxMergeCount}, IO throttle, stall, and close behavior
+ * remain per-scheduler. The gate only adds an extra pause constraint on top.
  *
  * @lucene.experimental
  */
 public final class GlobalConcurrentMergeScheduler extends ConcurrentMergeScheduler {
 
-  private static final Object INSTANCE_LOCK = new Object();
-  private static GlobalConcurrentMergeScheduler INSTANCE;
+  /**
+   * Shared concurrency gate used by {@link GlobalConcurrentMergeScheduler} instances. Implemented
+   * outside Lucene (e.g. Solr) so clusterprops / ZK wiring stays out of this class.
+   */
+  public interface MergeConcurrencyGate {
+    /**
+     * Possibly reduce {@code proposedMBPerSec} (typically to {@code 0.0} to pause) based on
+     * node-wide running-merge limits.
+     *
+     * @param scheduler the scheduler owning {@code mergeKey}
+     * @param mergeKey stable identity for the merge thread (typically the {@link MergeThread})
+     * @param proposedMBPerSec rate the local CMS would apply
+     * @return rate to apply
+     */
+    double adjustRate(
+        ConcurrentMergeScheduler scheduler, Object mergeKey, double proposedMBPerSec);
 
-  /** Number of IndexWriters currently holding this scheduler open. */
-  private int activeWriters;
+    /** Called when a scheduler is bound to an {@link IndexWriter}. */
+    void register(ConcurrentMergeScheduler scheduler);
 
-  private GlobalConcurrentMergeScheduler() {}
+    /** Called when a scheduler is closed; must release that scheduler's permits. */
+    void unregister(ConcurrentMergeScheduler scheduler);
 
-  /** Returns the JVM-wide singleton instance, creating it on first use. */
-  public static GlobalConcurrentMergeScheduler getInstance() {
-    synchronized (INSTANCE_LOCK) {
-      if (INSTANCE == null) {
-        INSTANCE = new GlobalConcurrentMergeScheduler();
-      }
-      return INSTANCE;
-    }
+    /**
+     * Called after this scheduler finished {@link #updateMergeThreads()}. Implementations must not
+     * call other schedulers synchronously (deadlock risk); wake peers asynchronously.
+     */
+    void afterUpdate(ConcurrentMergeScheduler scheduler);
+  }
+
+  /** Gate that never restricts rates (useful in unit tests). */
+  public static final MergeConcurrencyGate NOOP_GATE =
+      new MergeConcurrencyGate() {
+        @Override
+        public double adjustRate(
+            ConcurrentMergeScheduler scheduler, Object mergeKey, double proposedMBPerSec) {
+          return proposedMBPerSec;
+        }
+
+        @Override
+        public void register(ConcurrentMergeScheduler scheduler) {}
+
+        @Override
+        public void unregister(ConcurrentMergeScheduler scheduler) {}
+
+        @Override
+        public void afterUpdate(ConcurrentMergeScheduler scheduler) {}
+      };
+
+  private final MergeConcurrencyGate gate;
+
+  /** Creates a per-writer scheduler that consults {@code gate} for node-wide pause decisions. */
+  public GlobalConcurrentMergeScheduler(MergeConcurrencyGate gate) {
+    this.gate = Objects.requireNonNull(gate, "gate");
+  }
+
+  /** Returns the gate injected at construction. */
+  public MergeConcurrencyGate getGate() {
+    return gate;
   }
 
   /**
-   * Resets the singleton for tests. Must only be called when no writers still hold the scheduler
-   * open ({@link #getActiveWriterCount()} == 0).
-   *
-   * @lucene.internal
+   * Re-evaluates pause/run rates. Invoked asynchronously by the gate when peer schedulers free
+   * permits; must not be called while holding another CMS lock.
    */
-  public static void resetForTesting() {
-    synchronized (INSTANCE_LOCK) {
-      if (INSTANCE != null) {
-        synchronized (INSTANCE) {
-          if (INSTANCE.activeWriters != 0) {
-            throw new IllegalStateException(
-                "Cannot reset GlobalConcurrentMergeScheduler while activeWriters="
-                    + INSTANCE.activeWriters);
-          }
-        }
-      }
-      INSTANCE = null;
-    }
+  public void rebalanceMergeThreads() {
+    updateMergeThreads();
   }
 
-  /** Returns how many IndexWriters currently reference this scheduler. */
-  public synchronized int getActiveWriterCount() {
-    return activeWriters;
+  @Override
+  protected double adjustMergeRate(MergeThread mergeThread, double proposedMBPerSec) {
+    return gate.adjustRate(this, mergeThread, proposedMBPerSec);
+  }
+
+  @Override
+  protected synchronized void updateMergeThreads() {
+    super.updateMergeThreads();
+    gate.afterUpdate(this);
   }
 
   @Override
   void initialize(InfoStream infoStream, Directory directory) throws IOException {
-    synchronized (this) {
-      activeWriters++;
-      if (activeWriters == 1 || intraMergeExecutor == null) {
-        // First writer, or re-open after a full close tore down the executor.
-        super.initialize(infoStream, directory);
-      } else {
-        // Keep sharing the existing pool; refresh infoStream for logging (last-wins).
-        this.infoStream = infoStream;
-      }
-    }
-  }
-
-  @Override
-  public synchronized void merge(MergeSource mergeSource, MergeTrigger trigger) throws IOException {
-    // CMS disables IO throttle on CLOSING; that must stay local to the last writer so other
-    // cores are not affected when one core unloads.
-    if (trigger == MergeTrigger.CLOSING && activeWriters > 1) {
-      super.merge(mergeSource, MergeTrigger.EXPLICIT);
-      return;
-    }
-    super.merge(mergeSource, trigger);
+    super.initialize(infoStream, directory);
+    gate.register(this);
   }
 
   @Override
   public void close() throws IOException {
-    final boolean doFullClose;
-    synchronized (this) {
-      if (activeWriters <= 0) {
-        return;
-      }
-      activeWriters--;
-      doFullClose = activeWriters == 0;
-    }
-    if (doFullClose) {
-      // Join remaining merge threads and shut down the CachedExecutor only.
-      // Do not call MergeScheduler.close(): its SameThreadExecutorService is final and cannot
-      // be recreated, but cores may come and go over the JVM lifetime.
-      // Do not hold 'this' across sync() — merge threads need the CMS monitor.
-      try {
-        sync();
-      } finally {
-        shutdownIntraMergeExecutor();
-      }
+    try {
+      gate.unregister(this);
+    } finally {
+      super.close();
     }
   }
 
   @Override
   public String toString() {
     return getClass().getSimpleName()
-        + "[singleton, activeWriters="
-        + getActiveWriterCount()
-        + ", "
-        + "maxThreadCount="
+        + "[maxThreadCount="
         + getMaxThreadCount()
-        + ", "
-        + "maxMergeCount="
+        + ", maxMergeCount="
         + getMaxMergeCount()
-        + ", "
-        + "ioThrottle="
+        + ", ioThrottle="
         + getAutoIOThrottle()
         + "]";
   }
