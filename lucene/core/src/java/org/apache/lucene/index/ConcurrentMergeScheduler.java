@@ -570,9 +570,9 @@ public class ConcurrentMergeScheduler extends MergeScheduler {
         return;
       }
 
-      maybeStall(merge); //check if there's any stalls specific to merge
       boolean success = false;
       try {
+        maybeStall(merge); //check if there's any stalls specific to merge
         // OK to spawn a new merge thread to handle this
         // merge:
         final MergeThread newMergeThread = getMergeThread(mergeSource, merge);
