@@ -16,128 +16,72 @@
  */
 package org.apache.lucene.index;
 
-import java.io.IOException;
 import java.util.Objects;
-import org.apache.lucene.store.Directory;
-import org.apache.lucene.util.InfoStream;
 
 /**
- * Per-{@link IndexWriter} {@link ConcurrentMergeScheduler} that consults a shared {@link
- * MergeConcurrencyGate} when assigning merge IO rates. The gate may force a merge thread to pause
- * ({@code 0.0} MB/s) so that node-wide running-merge concurrency can be capped without sharing one
- * CMS instance across cores.
- *
- * <p>Local {@code maxThreadCount}/{@code maxMergeCount}, IO throttle, stall, and close behavior
- * remain per-scheduler. The gate only adds an extra pause constraint on top.
+ * Per-{@link IndexWriter} {@link ConcurrentMergeScheduler} that stalls merge spawning against a
+ * shared {@link MergeConcurrencySemaphore}, so node-wide concurrent merge threads can be capped
+ * without sharing one CMS instance across cores.
  *
  * @lucene.experimental
  */
-public final class GlobalConcurrentMergeScheduler extends ConcurrentMergeScheduler {
+public class GlobalConcurrentMergeScheduler extends ConcurrentMergeScheduler {
 
   /**
-   * Shared concurrency gate used by {@link GlobalConcurrentMergeScheduler} instances. Implemented
-   * outside Lucene (e.g. Solr) so clusterprops / ZK wiring stays out of this class.
+   * Shared concurrency semaphore used by {@link GlobalConcurrentMergeScheduler} instances.
+   * Implemented outside Lucene (e.g. Solr) so clusterprops / ZK wiring stays out of this class.
    */
-  public interface MergeConcurrencyGate {
-    /**
-     * Possibly reduce {@code proposedMBPerSec} (typically to {@code 0.0} to pause) based on
-     * node-wide running-merge limits.
-     *
-     * @param scheduler the scheduler owning {@code mergeKey}
-     * @param mergeKey stable identity for the merge thread (typically the {@link MergeThread})
-     * @param proposedMBPerSec rate the local CMS would apply
-     * @return rate to apply
-     */
-    double adjustRate(
-        ConcurrentMergeScheduler scheduler, Object mergeKey, double proposedMBPerSec);
+  public interface MergeConcurrencySemaphore {
+    boolean tryAcquire(MergePolicy.OneMerge merge);
 
-    /** Called when a scheduler is bound to an {@link IndexWriter}. */
-    void register(ConcurrentMergeScheduler scheduler);
-
-    /** Called when a scheduler is closed; must release that scheduler's permits. */
-    void unregister(ConcurrentMergeScheduler scheduler);
-
-    /**
-     * Called after this scheduler finished {@link #updateMergeThreads()}. Implementations must not
-     * call other schedulers synchronously (deadlock risk); wake peers asynchronously.
-     */
-    void afterUpdate(ConcurrentMergeScheduler scheduler);
+    void release(MergePolicy.OneMerge merge);
   }
 
-  /** Gate that never restricts rates (useful in unit tests). */
-  public static final MergeConcurrencyGate NOOP_GATE =
-      new MergeConcurrencyGate() {
+  /** Semaphore that never restricts merge spawning (useful in unit tests). */
+  public static final MergeConcurrencySemaphore UNLIMITED =
+      new MergeConcurrencySemaphore() {
         @Override
-        public double adjustRate(
-            ConcurrentMergeScheduler scheduler, Object mergeKey, double proposedMBPerSec) {
-          return proposedMBPerSec;
+        public boolean tryAcquire(MergePolicy.OneMerge merge) {
+          return true;
         }
 
         @Override
-        public void register(ConcurrentMergeScheduler scheduler) {}
-
-        @Override
-        public void unregister(ConcurrentMergeScheduler scheduler) {}
-
-        @Override
-        public void afterUpdate(ConcurrentMergeScheduler scheduler) {}
+        public void release(MergePolicy.OneMerge merge) {}
       };
 
-  private final MergeConcurrencyGate gate;
+  private final MergeConcurrencySemaphore semaphore;
 
-  /** Creates a per-writer scheduler that consults {@code gate} for node-wide pause decisions. */
-  public GlobalConcurrentMergeScheduler(MergeConcurrencyGate gate) {
-    this.gate = Objects.requireNonNull(gate, "gate");
+  public GlobalConcurrentMergeScheduler(MergeConcurrencySemaphore semaphore) {
+    this.semaphore = Objects.requireNonNull(semaphore);
   }
 
-  /** Returns the gate injected at construction. */
-  public MergeConcurrencyGate getGate() {
-    return gate;
-  }
-
-  /**
-   * Re-evaluates pause/run rates. Invoked asynchronously by the gate when peer schedulers free
-   * permits; must not be called while holding another CMS lock.
-   */
-  public void rebalanceMergeThreads() {
-    updateMergeThreads();
+  /** Returns the semaphore injected at construction. */
+  public MergeConcurrencySemaphore getSemaphore() {
+    return semaphore;
   }
 
   @Override
-  protected double adjustMergeRate(MergeThread mergeThread, double proposedMBPerSec) {
-    return gate.adjustRate(this, mergeThread, proposedMBPerSec);
-  }
+  protected synchronized void maybeStall(MergePolicy.OneMerge merge) {
+    super.maybeStall(merge);
 
-  @Override
-  protected synchronized void updateMergeThreads() {
-    super.updateMergeThreads();
-    gate.afterUpdate(this);
-  }
-
-  @Override
-  void initialize(InfoStream infoStream, Directory directory) throws IOException {
-    super.initialize(infoStream, directory);
-    gate.register(this);
-  }
-
-  @Override
-  public void close() throws IOException {
-    try {
-      gate.unregister(this);
-    } finally {
-      super.close();
+    while (!semaphore.tryAcquire(merge)) {
+      if (verbose()) {
+        message("    too many merges globally; stalling...");
+      }
+      doStall();
     }
   }
 
   @Override
-  public String toString() {
-    return getClass().getSimpleName()
-        + "[maxThreadCount="
-        + getMaxThreadCount()
-        + ", maxMergeCount="
-        + getMaxMergeCount()
-        + ", ioThrottle="
-        + getAutoIOThrottle()
-        + "]";
+  synchronized void runOnMergeFinished(MergeThread mergeThread) {
+    semaphore.release(mergeThread.merge); //need to release the semaphore here as super might call merge(mergeThread.mergeSource, MergeTrigger.MERGE_FINISHED), which could deadlock if we don't release the semaphore
+    super.runOnMergeFinished(mergeThread);
   }
+
+  @Override
+  protected void postMerge(MergePolicy.OneMerge merge) {
+    semaphore.release(merge); //in case the merge failed we still need to release the semaphore. If it was already released it will just be a no-op
+  }
+
+
 }

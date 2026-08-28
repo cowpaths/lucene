@@ -26,6 +26,8 @@ import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Consumer;
+
 import org.apache.lucene.index.MergePolicy.OneMerge;
 import org.apache.lucene.internal.tests.TestSecrets;
 import org.apache.lucene.store.AlreadyClosedException;
@@ -585,6 +587,7 @@ public class ConcurrentMergeScheduler extends MergeScheduler {
         return;
       }
 
+      maybeStall(merge);
       boolean success = false;
       try {
         // OK to spawn a new merge thread to handle this
@@ -605,6 +608,7 @@ public class ConcurrentMergeScheduler extends MergeScheduler {
       } finally {
         if (!success) {
           mergeSource.onMergeFinished(merge);
+          postMerge(merge);
         }
       }
     }
@@ -657,6 +661,10 @@ public class ConcurrentMergeScheduler extends MergeScheduler {
     return true;
   }
 
+  protected synchronized void maybeStall(OneMerge merge) {
+    //hook for subclass to stall based on merge
+  }
+
   /** Called from {@link #maybeStall} to pause the calling thread for a bit. */
   protected synchronized void doStall() {
     try {
@@ -684,14 +692,14 @@ public class ConcurrentMergeScheduler extends MergeScheduler {
     return thread;
   }
 
-  synchronized void runOnMergeFinished(MergeSource mergeSource) {
+  synchronized void runOnMergeFinished(MergeThread mergeThread) {
     // the merge call as well as the merge thread handling in the finally
     // block must be sync'd on CMS otherwise stalling decisions might cause
     // us to miss pending merges
     assert mergeThreads.contains(Thread.currentThread()) : "caller is not a merge thread";
     // Let CMS run new merges if necessary:
     try {
-      merge(mergeSource, MergeTrigger.MERGE_FINISHED);
+      merge(mergeThread.mergeSource, MergeTrigger.MERGE_FINISHED);
     } catch (
         @SuppressWarnings("unused")
         AlreadyClosedException ace) {
@@ -712,6 +720,7 @@ public class ConcurrentMergeScheduler extends MergeScheduler {
     final MergeSource mergeSource;
     final OneMerge merge;
     final MergeRateLimiter rateLimiter;
+    Runnable cleanupRunnable;
 
     /** Sole constructor. */
     public MergeThread(MergeSource mergeSource, OneMerge merge) {
@@ -749,7 +758,7 @@ public class ConcurrentMergeScheduler extends MergeScheduler {
                   rateToString(rateLimiter.getMBPerSec())));
         }
 
-        runOnMergeFinished(mergeSource);
+        runOnMergeFinished(this);
 
         if (verbose()) {
           message(String.format(Locale.ROOT, "merge thread %s end", this.getName()));
@@ -762,8 +771,19 @@ public class ConcurrentMergeScheduler extends MergeScheduler {
           // testing.
           handleMergeException(exc);
         }
+      } finally {
+        postMerge(merge);
       }
     }
+  }
+
+  /**
+   * Cleanup after the merge attempt finishes, whether it was successful or not.
+   * <br>
+   * This could be called multiple times hence should be idempotent
+   */
+  protected void postMerge(OneMerge merge) {
+    //hook for subclass to do clean up on mergeThread completion - whether it was successful or not
   }
 
   /** Called when an exception is hit in a background merge thread */
