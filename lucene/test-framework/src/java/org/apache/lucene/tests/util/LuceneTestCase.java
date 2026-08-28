@@ -996,8 +996,8 @@ public abstract class LuceneTestCase extends Assert {
         cms =
             new ConcurrentMergeScheduler() {
               @Override
-              protected synchronized boolean maybeStall(MergeSource mergeSource) {
-                return true;
+              protected synchronized MergePermit maybeStall(MergeSource mergeSource) {
+                return new MergePermit();
               }
             };
       }

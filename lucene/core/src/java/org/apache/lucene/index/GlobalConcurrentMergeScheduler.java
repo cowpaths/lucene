@@ -33,32 +33,26 @@ public class GlobalConcurrentMergeScheduler extends ConcurrentMergeScheduler {
    */
   public interface MergeConcurrencySemaphore {
     /**
-     * Tries to acquire a permit for the given merge. Returns true if a permit was acquired, false otherwise.
-     * <b>
-     * Call on merge that holds an active is a no-op and will return true
-     * @param merge
-     * @return whether a permit is successfully acquired by this merge
+     * Tries to acquire a permit without blocking.
+     *
+     * @return whether a permit was acquired
      */
-    boolean tryAcquire(MergePolicy.OneMerge merge);
+    boolean tryAcquire();
 
-    /**
-     * Release a previously acquired permit for the given merge.
-     * This is idempotent: if the merge was already released/never acquired, this method is a no-op.
-     * @param merge
-     */
-    void release(MergePolicy.OneMerge merge);
+    /** Releases one previously acquired permit. */
+    void release();
   }
 
   /** Semaphore that never restricts merge spawning (useful in unit tests). */
   public static final MergeConcurrencySemaphore UNLIMITED =
       new MergeConcurrencySemaphore() {
         @Override
-        public boolean tryAcquire(MergePolicy.OneMerge merge) {
+        public boolean tryAcquire() {
           return true;
         }
 
         @Override
-        public void release(MergePolicy.OneMerge merge) {}
+        public void release() {}
       };
 
   private final MergeConcurrencySemaphore semaphore;
@@ -72,43 +66,59 @@ public class GlobalConcurrentMergeScheduler extends ConcurrentMergeScheduler {
     return semaphore;
   }
 
+  private MergePermit getCurrentMergePermit() {
+    return mergeThreads.get(Thread.currentThread());
+  }
+
+  private void releaseCurrentMergePermit() {
+    MergePermit currentMergePermit = getCurrentMergePermit();
+    if (currentMergePermit != null) {
+      currentMergePermit.release();
+    }
+  }
+
   @Override
-  protected synchronized boolean maybeStall(MergePolicy.OneMerge merge) {
-    if (merge.isAborted()) {
-      return false;
+  protected synchronized MergePermit maybeStall(MergeSource mergeSource) {
+    if (super.maybeStall(mergeSource) == null) {
+      return null;
     }
 
-    if (super.maybeStall(merge) == false) {
-      return false;
+    //this thread should have already acquired a permit for this merge, so we don't need to acquire it again
+    MergePermit currentMergePermit = getCurrentMergePermit();
+    if (currentMergePermit != null) {
+      return currentMergePermit;
     }
 
-    // Never stall a merge thread (see maybeStall(MergeSource)): if no global permit is
-    // available, skip spawning so this thread can finish and notify waiters.
-    if (mergeThreads.contains(Thread.currentThread())) {
-      return semaphore.tryAcquire(merge);
-    }
-
-    while (!semaphore.tryAcquire(merge)) {
-      if (merge.isAborted()) {
-        return false;
-      }
+    while (!semaphore.tryAcquire()) {
       if (verbose()) {
         message("    too many merges globally; stalling...");
       }
       doStall();
     }
-    return true;
+    return new GlobalMergePermit();
+  }
+
+  class GlobalMergePermit extends MergePermit {
+    private boolean released = false;
+
+    @Override
+    public synchronized void release() {
+      if (!released) {
+        semaphore.release();
+        released = true;
+      }
+    }
   }
 
   @Override
   synchronized void runOnMergeFinished(MergeThread mergeThread) {
-    semaphore.release(mergeThread.merge); //need to release the semaphore here as super might call merge(mergeThread.mergeSource, MergeTrigger.MERGE_FINISHED), which could deadlock if we don't release the semaphore
+    releaseCurrentMergePermit(); //need to release the semaphore here as super might call merge(mergeThread.mergeSource, MergeTrigger.MERGE_FINISHED), which could deadlock if we don't release the semaphore
     super.runOnMergeFinished(mergeThread);
   }
 
   @Override
   protected void postMerge(MergePolicy.OneMerge merge) {
-    semaphore.release(merge); //in case the merge failed we still need to release the semaphore. If it was already released it will just be a no-op
+    releaseCurrentMergePermit(); //in case the merge failed we still need to release the semaphore. If it was already released it will just be a no-op
   }
 
 

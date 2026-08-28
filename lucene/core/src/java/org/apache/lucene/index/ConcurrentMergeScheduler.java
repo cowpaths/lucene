@@ -19,8 +19,11 @@ package org.apache.lucene.index;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
+import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.concurrent.Executor;
 import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadPoolExecutor;
@@ -72,7 +75,7 @@ public class ConcurrentMergeScheduler extends MergeScheduler {
   public static final String DEFAULT_CPU_CORE_COUNT_PROPERTY = "lucene.cms.override_core_count";
 
   /** List of currently active {@link MergeThread}s. */
-  protected final List<MergeThread> mergeThreads = new ArrayList<>();
+  protected final Map<MergeThread, MergePermit> mergeThreads = new LinkedHashMap<>();
 
   // Max number of merge threads allowed to be running at
   // once.  When there are more merges then this, we
@@ -255,9 +258,11 @@ public class ConcurrentMergeScheduler extends MergeScheduler {
   synchronized void removeMergeThread() {
     Thread currentThread = Thread.currentThread();
     // Paranoia: don't trust Thread.equals:
-    for (int i = 0; i < mergeThreads.size(); i++) {
-      if (mergeThreads.get(i) == currentThread) {
-        mergeThreads.remove(i);
+    Iterator<Map.Entry<MergeThread, MergePermit>> iterator = mergeThreads.entrySet().iterator();
+    while (iterator.hasNext()) {
+      Map.Entry<MergeThread, MergePermit> next = iterator.next();
+      if (next.getKey() == currentThread) {
+        iterator.remove();
         return;
       }
     }
@@ -315,11 +320,12 @@ public class ConcurrentMergeScheduler extends MergeScheduler {
     final List<MergeThread> activeMerges = new ArrayList<>();
 
     int threadIdx = 0;
+    Iterator<Map.Entry<MergeThread, MergePermit>> iterator = mergeThreads.entrySet().iterator();
     while (threadIdx < mergeThreads.size()) {
-      final MergeThread mergeThread = mergeThreads.get(threadIdx);
+      final MergeThread mergeThread = iterator.next().getKey();
       if (!mergeThread.isAlive()) {
         // Prune any dead threads
-        mergeThreads.remove(threadIdx);
+        iterator.remove();
         continue;
       }
       activeMerges.add(mergeThread);
@@ -477,7 +483,7 @@ public class ConcurrentMergeScheduler extends MergeScheduler {
       while (true) {
         MergeThread toSync = null;
         synchronized (this) {
-          for (MergeThread t : mergeThreads) {
+          for (MergeThread t : mergeThreads.keySet()) {
             // In case a merge thread is calling us, don't try to sync on
             // itself, since that will never finish!
             if (t.isAlive() && t != Thread.currentThread()) {
@@ -514,7 +520,7 @@ public class ConcurrentMergeScheduler extends MergeScheduler {
   public synchronized int mergeThreadCount() {
     Thread currentThread = Thread.currentThread();
     int count = 0;
-    for (MergeThread mergeThread : mergeThreads) {
+    for (MergeThread mergeThread : mergeThreads.keySet()) {
       if (currentThread != mergeThread
           && mergeThread.isAlive()
           && mergeThread.merge.isAborted() == false) {
@@ -557,8 +563,8 @@ public class ConcurrentMergeScheduler extends MergeScheduler {
     // Iterate, pulling from the IndexWriter's queue of
     // pending merges, until it's empty:
     while (true) {
-
-      if (maybeStall(mergeSource) == false) {
+      MergePermit permit = maybeStall(mergeSource);
+      if (permit == null) {
         break;
       }
 
@@ -567,18 +573,17 @@ public class ConcurrentMergeScheduler extends MergeScheduler {
         if (verbose()) {
           message("  no more merges pending; now return");
         }
+        // nothing to spawn, so hand the permit straight back
+        permit.release();
         return;
       }
 
       boolean success = false;
       try {
-        if (maybeStall(merge) == false) {
-          return;
-        }
         // OK to spawn a new merge thread to handle this
         // merge:
         final MergeThread newMergeThread = getMergeThread(mergeSource, merge);
-        mergeThreads.add(newMergeThread);
+        mergeThreads.put(newMergeThread, permit);
 
         updateIOThrottle(newMergeThread.merge, newMergeThread.rateLimiter);
 
@@ -593,7 +598,8 @@ public class ConcurrentMergeScheduler extends MergeScheduler {
       } finally {
         if (!success) {
           mergeSource.onMergeFinished(merge);
-          postMerge(merge);
+          // the merge thread never ran, so nothing else will hand this permit back
+          permit.release();
         }
       }
     }
@@ -609,7 +615,7 @@ public class ConcurrentMergeScheduler extends MergeScheduler {
    * <p>If this method wants to stall but the calling thread is a merge thread, it should return
    * false to tell caller not to kick off any new merges.
    */
-  protected synchronized boolean maybeStall(MergeSource mergeSource) {
+  protected synchronized MergePermit maybeStall(MergeSource mergeSource) {
     long startStallTime = 0;
     while (mergeSource.hasPendingMerges() && mergeThreadCount() >= maxMergeCount) {
 
@@ -623,11 +629,11 @@ public class ConcurrentMergeScheduler extends MergeScheduler {
       // thread to prevent creation of new segments,
       // until merging has caught up:
 
-      if (mergeThreads.contains(Thread.currentThread())) {
+      if (mergeThreads.containsKey(Thread.currentThread())) {
         // Never stall a merge thread since this blocks the thread from
         // finishing and calling updateMergeThreads, and blocking it
         // accomplishes nothing anyway (it's not really a segment producer):
-        return false;
+        return null;
       }
 
       if (startStallTime == 0) {
@@ -643,16 +649,7 @@ public class ConcurrentMergeScheduler extends MergeScheduler {
       message("  stalled for " + (System.currentTimeMillis() - startStallTime) + " ms");
     }
 
-    return true;
-  }
-
-  /**
-   * Hook for subclasses to stall before spawning a merge thread. Return {@code false} if the merge
-   * should not be started (e.g. aborted, or caller is a merge thread that must not block). The
-   * caller will invoke {@link MergeSource#onMergeFinished} and {@link #postMerge}.
-   */
-  protected synchronized boolean maybeStall(OneMerge merge) {
-    return true;
+    return new MergePermit(); //TODO should be singleton
   }
 
   /** Called from {@link #maybeStall} to pause the calling thread for a bit. */
@@ -686,7 +683,7 @@ public class ConcurrentMergeScheduler extends MergeScheduler {
     // the merge call as well as the merge thread handling in the finally
     // block must be sync'd on CMS otherwise stalling decisions might cause
     // us to miss pending merges
-    assert mergeThreads.contains(Thread.currentThread()) : "caller is not a merge thread";
+    assert mergeThreads.containsKey(Thread.currentThread()) : "caller is not a merge thread";
     // Let CMS run new merges if necessary:
     try {
       merge(mergeThread.mergeSource, MergeTrigger.MERGE_FINISHED);
@@ -814,7 +811,7 @@ public class ConcurrentMergeScheduler extends MergeScheduler {
 
   private boolean isBacklog(long now, OneMerge merge) {
     double mergeMB = bytesToMB(merge.estimatedMergeBytes);
-    for (MergeThread mergeThread : mergeThreads) {
+    for (MergeThread mergeThread : mergeThreads.keySet()) {
       long mergeStartNS = mergeThread.merge.mergeStartNS;
       if (mergeThread.isAlive()
           && mergeThread.merge != merge
@@ -861,7 +858,7 @@ public class ConcurrentMergeScheduler extends MergeScheduler {
         curBacklog = true;
       } else {
         // Now see if any still-running merges are backlog'd:
-        for (MergeThread mergeThread : mergeThreads) {
+        for (MergeThread mergeThread : mergeThreads.keySet()) {
           if (isBacklog(now, mergeThread.merge)) {
             curBacklog = true;
             break;
@@ -1011,5 +1008,20 @@ public class ConcurrentMergeScheduler extends MergeScheduler {
         command.run();
       }
     }
+  }
+
+  /**
+   * Token returned by {@link #maybeStall(MergeSource)} granting the right to spawn one merge
+   * thread. The scheduler hands it back via {@link #release()} once the merge is done (or never
+   * started). Implementations must tolerate being released more than once.
+   *
+   * @lucene.experimental
+   */
+  public class MergePermit {
+    /** Sole constructor. */
+    public MergePermit() {}
+
+    /** Gives the permit back. Must be idempotent. */
+    public void release() {}
   }
 }
