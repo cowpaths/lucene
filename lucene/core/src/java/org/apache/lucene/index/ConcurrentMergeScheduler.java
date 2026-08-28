@@ -26,8 +26,6 @@ import java.util.concurrent.SynchronousQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Consumer;
-
 import org.apache.lucene.index.MergePolicy.OneMerge;
 import org.apache.lucene.internal.tests.TestSecrets;
 import org.apache.lucene.store.AlreadyClosedException;
@@ -380,9 +378,6 @@ public class ConcurrentMergeScheduler extends MergeScheduler {
         newMBPerSec = targetMBPerSec;
       }
 
-      // Subclasses (e.g. GlobalConcurrentMergeScheduler) may further restrict the rate.
-      newMBPerSec = adjustMergeRate(mergeThread, newMBPerSec);
-
       MergeRateLimiter rateLimiter = mergeThread.rateLimiter;
       double curMBPerSec = rateLimiter.getMBPerSec();
 
@@ -435,18 +430,6 @@ public class ConcurrentMergeScheduler extends MergeScheduler {
     if (verbose()) {
       message(message.toString());
     }
-  }
-
-  /**
-   * Hook for subclasses to further restrict (or leave unchanged) the merge IO rate chosen by {@link
-   * #updateMergeThreads()}. Returning {@code 0.0} pauses the merge thread.
-   *
-   * @param mergeThread the merge thread whose rate is being set
-   * @param proposedMBPerSec rate that this scheduler would apply before external constraints
-   * @return the rate to apply (may be {@code 0.0} to pause)
-   */
-  protected double adjustMergeRate(MergeThread mergeThread, double proposedMBPerSec) {
-    return proposedMBPerSec;
   }
 
   private synchronized void initDynamicDefaults(Directory directory) throws IOException {
@@ -587,7 +570,7 @@ public class ConcurrentMergeScheduler extends MergeScheduler {
         return;
       }
 
-      maybeStall(merge);
+      maybeStall(merge); //check if there's any stalls specific to merge
       boolean success = false;
       try {
         // OK to spawn a new merge thread to handle this
@@ -720,7 +703,6 @@ public class ConcurrentMergeScheduler extends MergeScheduler {
     final MergeSource mergeSource;
     final OneMerge merge;
     final MergeRateLimiter rateLimiter;
-    Runnable cleanupRunnable;
 
     /** Sole constructor. */
     public MergeThread(MergeSource mergeSource, OneMerge merge) {
