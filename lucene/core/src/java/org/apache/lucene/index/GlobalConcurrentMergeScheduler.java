@@ -32,8 +32,20 @@ public class GlobalConcurrentMergeScheduler extends ConcurrentMergeScheduler {
    * Implemented outside Lucene (e.g. Solr) so clusterprops / ZK wiring stays out of this class.
    */
   public interface MergeConcurrencySemaphore {
+    /**
+     * Tries to acquire a permit for the given merge. Returns true if a permit was acquired, false otherwise.
+     * <b>
+     * Call on merge that holds an active is a no-op and will return true
+     * @param merge
+     * @return whether a permit is successfully acquired by this merge
+     */
     boolean tryAcquire(MergePolicy.OneMerge merge);
 
+    /**
+     * Release a previously acquired permit for the given merge.
+     * This is idempotent: if the merge was already released, this method is a no-op.
+     * @param merge
+     */
     void release(MergePolicy.OneMerge merge);
   }
 
