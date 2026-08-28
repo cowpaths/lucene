@@ -43,7 +43,7 @@ public class GlobalConcurrentMergeScheduler extends ConcurrentMergeScheduler {
 
     /**
      * Release a previously acquired permit for the given merge.
-     * This is idempotent: if the merge was already released, this method is a no-op.
+     * This is idempotent: if the merge was already released/never acquired, this method is a no-op.
      * @param merge
      */
     void release(MergePolicy.OneMerge merge);
