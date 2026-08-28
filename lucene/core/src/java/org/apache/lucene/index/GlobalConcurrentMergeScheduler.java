@@ -61,15 +61,31 @@ public class GlobalConcurrentMergeScheduler extends ConcurrentMergeScheduler {
   }
 
   @Override
-  protected synchronized void maybeStall(MergePolicy.OneMerge merge) {
-    super.maybeStall(merge);
+  protected synchronized boolean maybeStall(MergePolicy.OneMerge merge) {
+    if (merge.isAborted()) {
+      return false;
+    }
+
+    if (super.maybeStall(merge) == false) {
+      return false;
+    }
+
+    // Never stall a merge thread (see maybeStall(MergeSource)): if no global permit is
+    // available, skip spawning so this thread can finish and notify waiters.
+    if (mergeThreads.contains(Thread.currentThread())) {
+      return semaphore.tryAcquire(merge);
+    }
 
     while (!semaphore.tryAcquire(merge)) {
+      if (merge.isAborted()) {
+        return false;
+      }
       if (verbose()) {
         message("    too many merges globally; stalling...");
       }
       doStall();
     }
+    return true;
   }
 
   @Override

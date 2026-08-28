@@ -572,7 +572,9 @@ public class ConcurrentMergeScheduler extends MergeScheduler {
 
       boolean success = false;
       try {
-        maybeStall(merge); //check if there's any stalls specific to merge
+        if (maybeStall(merge) == false) {
+          return;
+        }
         // OK to spawn a new merge thread to handle this
         // merge:
         final MergeThread newMergeThread = getMergeThread(mergeSource, merge);
@@ -644,8 +646,13 @@ public class ConcurrentMergeScheduler extends MergeScheduler {
     return true;
   }
 
-  protected synchronized void maybeStall(OneMerge merge) {
-    //hook for subclass to stall based on merge
+  /**
+   * Hook for subclasses to stall before spawning a merge thread. Return {@code false} if the merge
+   * should not be started (e.g. aborted, or caller is a merge thread that must not block). The
+   * caller will invoke {@link MergeSource#onMergeFinished} and {@link #postMerge}.
+   */
+  protected synchronized boolean maybeStall(OneMerge merge) {
+    return true;
   }
 
   /** Called from {@link #maybeStall} to pause the calling thread for a bit. */
