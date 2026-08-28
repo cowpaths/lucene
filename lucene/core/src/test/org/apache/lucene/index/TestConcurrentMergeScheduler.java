@@ -476,7 +476,7 @@ public class TestConcurrentMergeScheduler extends LuceneTestCase {
       AtomicInteger threadsExecutedOnPool = new AtomicInteger();
       AtomicInteger threadsExecutedOnSelf = new AtomicInteger();
       for (int i = 0; i < 4; i++) {
-        mergeScheduler.mergeThreads.add(
+        mergeScheduler.mergeThreads.put(
             mergeScheduler.new MergeThread(mergeSource, merge) {
               @Override
               @SuppressForbidden(reason = "Thread sleep")
@@ -495,9 +495,10 @@ public class TestConcurrentMergeScheduler extends LuceneTestCase {
                       }
                     });
               }
-            });
+            },
+            mergeScheduler.new MergePermit());
       }
-      for (ConcurrentMergeScheduler.MergeThread thread : mergeScheduler.mergeThreads) {
+      for (ConcurrentMergeScheduler.MergeThread thread : mergeScheduler.mergeThreads.keySet()) {
         thread.start();
       }
       mergeScheduler.sync();
@@ -682,9 +683,9 @@ public class TestConcurrentMergeScheduler extends LuceneTestCase {
     iwc.setMergeScheduler(
         new ConcurrentMergeScheduler() {
           @Override
-          protected boolean maybeStall(MergeSource mergeSource) {
+          protected MergePermit maybeStall(MergeSource mergeSource) {
             wasCalled.set(true);
-            return true;
+            return new MergePermit();
           }
         });
     IndexWriter w = new IndexWriter(dir, iwc);
