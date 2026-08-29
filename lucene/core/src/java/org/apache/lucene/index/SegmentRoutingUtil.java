@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.time.format.DateTimeParseException;
 import java.util.Arrays;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Utility for mapping segments to "time based buckets" based on the value of a temporal field in the documents they contain.
@@ -48,6 +49,10 @@ public class SegmentRoutingUtil {
     initBaseTime(System.getProperty("lucene.temporalField.adjustNow"));
   }
 
+  //TODO test param below
+  private static final boolean useDynamicNow = Boolean.parseBoolean(System.getProperty("lucene.temporalField.dynamicNow", "false"));
+  private static AtomicLong DYNAMIC_NOW = new AtomicLong(-1);
+
   static void initBaseTime(String nowString) {
     if (nowString == null) {
       NOW_BASE_MILLI_SEC = System.currentTimeMillis();
@@ -64,6 +69,9 @@ public class SegmentRoutingUtil {
   }
 
   public static long getNow() {
+    if (useDynamicNow && DYNAMIC_NOW.get() != -1) {
+      return DYNAMIC_NOW.get();
+    }
     if (ADJUST_NOW != null) { //explicitly defined a static now time. Use it for all calls
       return ADJUST_NOW;
     } else {
@@ -142,6 +150,8 @@ public class SegmentRoutingUtil {
       for (IndexableField f : doc) {
         String name = f.name();
         if (TEMPORAL_FIELD_NAME.equals(name)) {
+          recordDynamicNow(f.numericValue().longValue());
+
           return mapToBucket(f.numericValue().longValue(), now);
         } else if (FALLBACK_FIELD_NAMES != null) {
           for (int i = fallbackIdx; i >= 0; i--) {
@@ -156,6 +166,7 @@ public class SegmentRoutingUtil {
         for (int i = fallbackIdx + 1, lim = FALLBACK_FIELD_NAMES.length; i < lim; i++) {
           IndexableField f = fallbacks[i];
           if (f != null) {
+            recordDynamicNow(f.numericValue().longValue());
             return mapToBucket(f.numericValue().longValue(), now);
           }
         }
@@ -163,6 +174,13 @@ public class SegmentRoutingUtil {
       return defaultBucket;
     }
   }
+
+  private static void recordDynamicNow(Long val) {
+    if (useDynamicNow) { //ensure it's advancing
+      DYNAMIC_NOW.accumulateAndGet(val, Math::max);
+    }
+  }
+
 
   public static long mapToBucket(long timestamp, long now) {
     long diff = now - timestamp;
