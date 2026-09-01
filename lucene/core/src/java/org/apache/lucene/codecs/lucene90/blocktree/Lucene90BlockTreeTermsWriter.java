@@ -262,7 +262,7 @@ public final class Lucene90BlockTreeTermsWriter extends FieldsConsumer {
         postingsWriter,
         minItemsInBlock,
         maxItemsInBlock,
-        Lucene90BlockTreeTermsReader.VERSION_CURRENT);
+        Lucene90BlockTreeTermsReader.VERSION_START);
   }
 
   /** Expert constructor that allows configuring the version, used for bw tests. */

@@ -246,7 +246,7 @@ public class FSTCompiler<T> {
     private boolean allowFixedLengthArcs = true;
     private DataOutput dataOutput;
     private float directAddressingMaxOversizingFactor = DIRECT_ADDRESSING_MAX_OVERSIZING_FACTOR;
-    private int version = FST.VERSION_CURRENT;
+    private int version = FST.VERSION_90;
 
     /**
      * @param inputType The input type (transition labels). Can be anything from {@link INPUT_TYPE}
@@ -333,12 +333,12 @@ public class FSTCompiler<T> {
 
     /** Expert: Set the codec version. * */
     public Builder<T> setVersion(int version) {
-      if (version < FST.VERSION_90 || version > FST.VERSION_CURRENT) {
+      if (version < FST.VERSION_90 || version > FST.VERSION_90) {
         throw new IllegalArgumentException(
             "Expected version in range ["
                 + FST.VERSION_90
                 + ", "
-                + FST.VERSION_CURRENT
+                + FST.VERSION_90
                 + "], got "
                 + version);
       }
