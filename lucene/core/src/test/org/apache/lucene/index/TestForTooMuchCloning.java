@@ -16,6 +16,8 @@
  */
 package org.apache.lucene.index;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.TextField;
@@ -65,6 +67,23 @@ public class TestForTooMuchCloning extends LuceneTestCase {
         dir.getInputCloneCount() < 500);
 
     final IndexSearcher s = newSearcher(r);
+
+    // NOTE: this is a workaround -- holding Terms instances in memory prevent them
+    // from being GC'd, which prevents the backing FieldsProducer from being aggressively
+    // unloaded (via `Unloader`), which artificially inflates the number of clones.
+    @SuppressWarnings("unused")
+    Terms[] holdTermsHack =
+        s.getLeafContexts().stream()
+            .map(
+                (c) -> {
+                  try {
+                    return c.reader().terms("field");
+                  } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                  }
+                })
+            .toArray(Terms[]::new);
+
     // important: set this after newSearcher, it might have run checkindex
     final int cloneCount = dir.getInputCloneCount();
     // dir.setVerboseClone(true);
@@ -83,5 +102,6 @@ public class TestForTooMuchCloning extends LuceneTestCase {
         queryCloneCount < 50);
     r.close();
     dir.close();
+    holdTermsHack = null; // ensure it's referenced, so it's not GC'd until now.
   }
 }

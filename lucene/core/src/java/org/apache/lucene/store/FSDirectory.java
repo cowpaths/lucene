@@ -36,11 +36,17 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Supplier;
+import org.apache.lucene.index.Unloader;
 import org.apache.lucene.util.Constants;
 import org.apache.lucene.util.IOUtils;
+import org.apache.lucene.util.InfoStream;
+import org.apache.lucene.util.NamedThreadFactory;
 
 /**
  * Base class for Directory implementations that store index files in the file system. <a
@@ -90,7 +96,7 @@ import org.apache.lucene.util.IOUtils;
  *
  * @see Directory
  */
-public abstract class FSDirectory extends BaseDirectory {
+public abstract class FSDirectory extends BaseDirectory implements UnloaderCoordinationPoint {
 
   protected final Path directory; // The underlying filesystem directory
 
@@ -128,6 +134,9 @@ public abstract class FSDirectory extends BaseDirectory {
       Files.createDirectories(path); // create directory, if it doesn't exist
     }
     directory = path.toRealPath();
+    if (exec != null) {
+      unloadHelperSupplier = () -> new Unloader.AbstractUnloadHelper(exec, InfoStream.NO_OUTPUT) {};
+    }
   }
 
   /**
@@ -283,7 +292,32 @@ public abstract class FSDirectory extends BaseDirectory {
   @Override
   public synchronized void close() throws IOException {
     isOpen = false;
+    if (Unloader.EXECUTOR_PER_DIRECTORY) {
+      exec.shutdownNow();
+    }
     deletePendingFiles();
+  }
+
+  private final ScheduledExecutorService exec =
+      Unloader.EXECUTOR_PER_DIRECTORY
+          ? Executors.newSingleThreadScheduledExecutor(
+              new NamedThreadFactory("unload@" + System.identityHashCode(this)))
+          : null;
+
+  private volatile Supplier<Unloader.UnloadHelper> unloadHelperSupplier;
+
+  @Override
+  public void setUnloadHelperSupplier(Supplier<Unloader.UnloadHelper> supplier) {
+    if (Unloader.EXECUTOR_PER_DIRECTORY) {
+      throw new IllegalStateException();
+    }
+    this.unloadHelperSupplier = supplier;
+  }
+
+  @Override
+  public Unloader.UnloadHelper getUnloadHelper() {
+    Supplier<Unloader.UnloadHelper> supplier = unloadHelperSupplier;
+    return supplier == null ? null : supplier.get();
   }
 
   /**

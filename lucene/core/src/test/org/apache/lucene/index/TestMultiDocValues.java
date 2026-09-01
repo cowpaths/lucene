@@ -55,6 +55,7 @@ public class TestMultiDocValues extends LuceneTestCase {
       }
     }
     DirectoryReader ir = iw.getReader();
+    incRefFiles(iw, ir);
     iw.forceMerge(1);
     DirectoryReader ir2 = iw.getReader();
     LeafReader merged = getOnlyLeafReader(ir2);
@@ -100,6 +101,7 @@ public class TestMultiDocValues extends LuceneTestCase {
       }
     }
     DirectoryReader ir = iw.getReader();
+    incRefFiles(iw, ir);
     iw.forceMerge(1);
     DirectoryReader ir2 = iw.getReader();
     LeafReader merged = getOnlyLeafReader(ir2);
@@ -149,6 +151,7 @@ public class TestMultiDocValues extends LuceneTestCase {
       }
     }
     DirectoryReader ir = iw.getReader();
+    incRefFiles(iw, ir);
     iw.forceMerge(1);
     DirectoryReader ir2 = iw.getReader();
     LeafReader merged = getOnlyLeafReader(ir2);
@@ -202,6 +205,7 @@ public class TestMultiDocValues extends LuceneTestCase {
       }
     }
     DirectoryReader ir = iw.getReader();
+    incRefFiles(iw, ir);
     iw.forceMerge(1);
     DirectoryReader ir2 = iw.getReader();
     LeafReader merged = getOnlyLeafReader(ir2);
@@ -254,6 +258,7 @@ public class TestMultiDocValues extends LuceneTestCase {
       }
     }
     DirectoryReader ir = iw.getReader();
+    incRefFiles(iw, ir);
     iw.forceMerge(1);
     DirectoryReader ir2 = iw.getReader();
     LeafReader merged = getOnlyLeafReader(ir2);
@@ -320,6 +325,7 @@ public class TestMultiDocValues extends LuceneTestCase {
       }
     }
     DirectoryReader ir = iw.getReader();
+    incRefFiles(iw, ir);
     iw.forceMerge(1);
     DirectoryReader ir2 = iw.getReader();
     LeafReader merged = getOnlyLeafReader(ir2);
@@ -385,6 +391,7 @@ public class TestMultiDocValues extends LuceneTestCase {
       }
     }
     DirectoryReader ir = iw.getReader();
+    incRefFiles(iw, ir);
     iw.forceMerge(1);
     DirectoryReader ir2 = iw.getReader();
     LeafReader merged = getOnlyLeafReader(ir2);
@@ -444,6 +451,26 @@ public class TestMultiDocValues extends LuceneTestCase {
       final boolean exists1 = iter1.advanceExact(target);
       final boolean exists2 = iter2.advanceExact(target);
       assertEquals(exists1, exists2);
+    }
+  }
+
+  /**
+   * In conjunction with {@link Unloader}, certain configurations/implementations of {@link
+   * DirectoryReader} do not incRef their associated files. This is a problem here because the files
+   * get deleted (though presumably still referenced as zombie filehandles from
+   * <i>unclosed</i>/non-unloading resource objects.
+   *
+   * <p>To work around this, we manually incRef the files.
+   *
+   * <p>TODO: confirm that in practice this will be a "test-only" problem.
+   */
+  private static void incRefFiles(RandomIndexWriter w, DirectoryReader ir) throws IOException {
+    ir = FilterDirectoryReader.unwrap(ir);
+    if (ir instanceof StandardDirectoryReader) {
+      StandardDirectoryReader sdr = (StandardDirectoryReader) ir;
+      SegmentInfos segInfos = sdr.segmentInfos;
+      IndexWriter writer = w.w;
+      writer.incRefDeleter(segInfos);
     }
   }
 }

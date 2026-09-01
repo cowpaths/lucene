@@ -27,33 +27,38 @@ import org.apache.lucene.tests.util.TestUtil;
 
 public class TestCodecHoldsOpenFiles extends LuceneTestCase {
   public void test() throws Exception {
-    BaseDirectoryWrapper d = newDirectory();
-    d.setCheckIndexOnClose(false);
-    // we nuke files, but verify the reader still works
-    RandomIndexWriter w = new RandomIndexWriter(random(), d);
-    int numDocs = atLeast(100);
-    for (int i = 0; i < numDocs; i++) {
-      Document doc = new Document();
-      doc.add(newField("foo", "bar", TextField.TYPE_NOT_STORED));
-      doc.add(new IntPoint("doc", i));
-      doc.add(new IntPoint("doc2d", i, i));
-      doc.add(new NumericDocValuesField("dv", i));
-      w.addDocument(doc);
+    Unloader.DISABLE = true;
+    try {
+      BaseDirectoryWrapper d = newDirectory();
+      d.setCheckIndexOnClose(false);
+      // we nuke files, but verify the reader still works
+      RandomIndexWriter w = new RandomIndexWriter(random(), d);
+      int numDocs = atLeast(100);
+      for (int i = 0; i < numDocs; i++) {
+        Document doc = new Document();
+        doc.add(newField("foo", "bar", TextField.TYPE_NOT_STORED));
+        doc.add(new IntPoint("doc", i));
+        doc.add(new IntPoint("doc2d", i, i));
+        doc.add(new NumericDocValuesField("dv", i));
+        w.addDocument(doc);
+      }
+
+      IndexReader r = w.getReader();
+      w.commit();
+      w.close();
+
+      for (String name : d.listAll()) {
+        d.deleteFile(name);
+      }
+
+      for (LeafReaderContext cxt : r.leaves()) {
+        TestUtil.checkReader(cxt.reader());
+      }
+
+      r.close();
+      d.close();
+    } finally {
+      Unloader.DISABLE = false;
     }
-
-    IndexReader r = w.getReader();
-    w.commit();
-    w.close();
-
-    for (String name : d.listAll()) {
-      d.deleteFile(name);
-    }
-
-    for (LeafReaderContext cxt : r.leaves()) {
-      TestUtil.checkReader(cxt.reader());
-    }
-
-    r.close();
-    d.close();
   }
 }

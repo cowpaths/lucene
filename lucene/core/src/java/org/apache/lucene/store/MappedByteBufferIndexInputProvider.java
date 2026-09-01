@@ -37,6 +37,7 @@ import org.apache.lucene.store.ByteBufferGuard.BufferCleaner;
 import org.apache.lucene.util.Constants;
 import org.apache.lucene.util.SuppressForbidden;
 
+/** Provides {@link IndexInput} over {@link MappedByteBuffer}s. */
 public final class MappedByteBufferIndexInputProvider
     implements MMapDirectory.MMapIndexInputProvider {
 

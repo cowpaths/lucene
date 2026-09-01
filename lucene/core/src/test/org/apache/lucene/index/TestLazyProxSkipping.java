@@ -62,7 +62,7 @@ public class TestLazyProxSkipping extends LuceneTestCase {
     }
   }
 
-  private void createIndex(int numHits) throws IOException {
+  private Directory createIndex(int numHits) throws IOException {
     int numDocs = 500;
 
     final Analyzer analyzer =
@@ -106,6 +106,7 @@ public class TestLazyProxSkipping extends LuceneTestCase {
     LeafReader reader = getOnlyLeafReader(DirectoryReader.open(directory));
 
     this.searcher = newSearcher(reader);
+    return directory;
   }
 
   private ScoreDoc[] search() throws IOException {
@@ -115,7 +116,7 @@ public class TestLazyProxSkipping extends LuceneTestCase {
   }
 
   private void performTest(int numHits) throws IOException {
-    createIndex(numHits);
+    Directory dir = createIndex(numHits);
     this.seeksCounter = 0;
     ScoreDoc[] hits = search();
     // verify that the right number of docs was found
@@ -127,6 +128,7 @@ public class TestLazyProxSkipping extends LuceneTestCase {
         "seeksCounter=" + this.seeksCounter + " numHits=" + numHits,
         this.seeksCounter <= numHits + 1);
     searcher.getIndexReader().close();
+    dir.close();
   }
 
   public void testLazySkipping() throws IOException {

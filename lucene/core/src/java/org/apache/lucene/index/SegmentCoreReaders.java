@@ -30,6 +30,7 @@ import org.apache.lucene.codecs.CompoundDirectory;
 import org.apache.lucene.codecs.FieldsProducer;
 import org.apache.lucene.codecs.KnnVectorsReader;
 import org.apache.lucene.codecs.NormsProducer;
+import org.apache.lucene.codecs.PointsFormat;
 import org.apache.lucene.codecs.PointsReader;
 import org.apache.lucene.codecs.PostingsFormat;
 import org.apache.lucene.codecs.StoredFieldsReader;
@@ -149,7 +150,14 @@ final class SegmentCoreReaders {
       }
 
       if (coreFieldInfos.hasPointValues()) {
-        pointsReader = codec.pointsFormat().fieldsReader(segmentReadState);
+        PointsFormat pf = codec.pointsFormat();
+        if (pf instanceof Unloader.UnloadAware
+            && ((Unloader.UnloadAware) pf).disableUnload(segmentReadState)) {
+          pointsReader = pf.fieldsReader(segmentReadState);
+        } else {
+          pointsReader =
+              Unloader.pointsReader(() -> pf.fieldsReader(segmentReadState), dir, segmentReadState);
+        }
       } else {
         pointsReader = null;
       }

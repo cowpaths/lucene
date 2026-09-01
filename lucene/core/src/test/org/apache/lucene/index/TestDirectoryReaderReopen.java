@@ -1068,6 +1068,8 @@ public class TestDirectoryReaderReopen extends LuceneTestCase {
         () -> {
           DirectoryReader.openIfChanged(r);
         });
+    r.close();
+    dir.close();
   }
 
   public void testReuseUnchangedLeafReaderOnDVUpdate() throws IOException {

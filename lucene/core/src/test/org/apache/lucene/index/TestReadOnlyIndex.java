@@ -100,6 +100,7 @@ public class TestReadOnlyIndex extends LuceneTestCase {
     assertEquals(1, isearcher.count(phraseQuery));
 
     ireader.close();
+    dir.close();
     return null; // void
   }
 }

@@ -43,6 +43,7 @@ import org.apache.lucene.index.MergeState;
 import org.apache.lucene.index.SegmentReadState;
 import org.apache.lucene.index.SegmentWriteState;
 import org.apache.lucene.index.Terms;
+import org.apache.lucene.index.Unloader;
 import org.apache.lucene.util.CollectionUtil;
 import org.apache.lucene.util.IOUtils;
 import org.apache.lucene.util.MergedIterator;
@@ -323,9 +324,16 @@ public abstract class PerFieldPostingsFormat extends PostingsFormat {
               PostingsFormat format = PostingsFormat.forName(formatName);
               String segmentSuffix = getSuffix(formatName, suffix);
               if (!formats.containsKey(segmentSuffix)) {
-                formats.put(
-                    segmentSuffix,
-                    format.fieldsProducer(new SegmentReadState(readState, segmentSuffix)));
+                SegmentReadState srs = new SegmentReadState(readState, segmentSuffix);
+                FieldsProducer fp;
+                if (format instanceof Unloader.UnloadAware
+                    && ((Unloader.UnloadAware) format).disableUnload(srs)) {
+                  fp = format.fieldsProducer(srs);
+                } else {
+                  fp =
+                      Unloader.fieldsProducer(() -> format.fieldsProducer(srs), srs.directory, srs);
+                }
+                formats.put(segmentSuffix, fp);
               }
               fields.put(fieldName, formats.get(segmentSuffix));
             }

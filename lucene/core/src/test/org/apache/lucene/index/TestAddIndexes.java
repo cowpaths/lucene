@@ -1053,6 +1053,7 @@ public class TestAddIndexes extends LuceneTestCase {
     void closeDir() throws Throwable {
       for (int i = 0; i < NUM_COPY; i++) readers[i].close();
       dir2.close();
+      dir.close();
     }
 
     abstract void doBody(int j, Directory[] dirs) throws Throwable;
@@ -1464,6 +1465,7 @@ public class TestAddIndexes extends LuceneTestCase {
     assertEquals("Only one compound segment should exist", 1, sis.size());
     assertTrue(sis.info(0).info.getUseCompoundFile());
     dir.close();
+    IOUtils.close(dirs);
   }
 
   private static final class UnRegisteredCodec extends FilterCodec {

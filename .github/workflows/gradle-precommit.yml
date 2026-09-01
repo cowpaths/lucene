@@ -43,7 +43,7 @@ jobs:
       uses: ./.github/actions/gradle-caches
 
     - name: Run gradle check (without tests)
-      run: ./gradlew check -x test -Ptask.times=true --max-workers 2
+      run: ./gradlew check -x test -Ptask.times=true --max-workers 2 -x :lucene:analysis.tests:renderJavadoc -x :lucene:distribution.tests:renderJavadoc -x :lucene:analysis:morfologik.tests:renderJavadoc
 
   # This runs all tests without any other validation checks.
   tests:
@@ -74,7 +74,7 @@ jobs:
       uses: ./.github/actions/gradle-caches
 
     - name: Run gradle tests
-      run: ./gradlew test "-Ptask.times=true" --max-workers 2
+      run: ./gradlew test "-Ptask.times=true" -Plucene.unload.executorPerDirectory=true -Plucene.unload.ttl=1 -Plucene.unload.initial=0 --max-workers 2
 
     - name: Echo settings
       run: cat gradle.properties

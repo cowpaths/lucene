@@ -96,6 +96,8 @@ public class TestMultiLevelSkipList extends LuceneTestCase {
       // because than more bytes would be read from the freqStream
       checkSkipTo(tp, 4800, 250); // one skip on level 2
     }
+    reader.close();
+    dir.close();
   }
 
   public void checkSkipTo(PostingsEnum tp, int target, int maxCounter) throws IOException {
