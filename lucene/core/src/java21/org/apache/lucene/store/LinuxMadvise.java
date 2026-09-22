@@ -70,6 +70,13 @@ final class LinuxMadvise implements BlockCacheMmapProvider {
   private static final boolean FORCE_WILLNEED =
       Boolean.getBoolean("org.apache.lucene.store.LinuxMadvise.forceWillneed");
 
+  private static final boolean GLOBAL_ARENA;
+
+  static {
+    String spec = System.getProperty("org.apache.lucene.store.LinuxMadvise.globalArena");
+    GLOBAL_ARENA = spec == null || "true".equals(spec);
+  }
+
   private LinuxMadvise() {}
 
   static {
@@ -123,7 +130,7 @@ final class LinuxMadvise implements BlockCacheMmapProvider {
   public BlockCacheMapping open(Path path, int blockSize, int nBlocks) throws IOException {
     boolean removeSupported = !FORCE_WILLNEED && probeRemove(path.getParent(), blockSize);
     long dataSize = (long) nBlocks * blockSize;
-    Arena arena = Arena.ofShared();
+    Arena arena = GLOBAL_ARENA ? Arena.global() : Arena.ofShared();
     boolean success = false;
     try {
       MemorySegment seg = mapStore(path, dataSize, arena);
@@ -131,7 +138,7 @@ final class LinuxMadvise implements BlockCacheMmapProvider {
       success = true;
       return new Mapping(arena, seg.address(), blockSize, dataSize, pool, removeSupported);
     } finally {
-      if (!success) arena.close();
+      if (!GLOBAL_ARENA && !success) arena.close();
     }
   }
 
@@ -278,7 +285,7 @@ final class LinuxMadvise implements BlockCacheMmapProvider {
 
     @Override
     public void close() throws IOException {
-      arena.close();
+      if (!GLOBAL_ARENA) arena.close();
     }
 
     @Override
