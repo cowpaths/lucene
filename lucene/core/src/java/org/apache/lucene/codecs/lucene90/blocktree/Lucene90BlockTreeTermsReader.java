@@ -134,9 +134,10 @@ public final class Lucene90BlockTreeTermsReader extends FieldsProducer {
       String termsName =
           IndexFileNames.segmentFileName(segment, state.segmentSuffix, TERMS_EXTENSION);
       termsIn = state.directory.openInput(termsName, state.context);
+      IndexInput termsInClone = termsIn.clone();
       version =
           CodecUtil.checkIndexHeader(
-              termsIn,
+              termsInClone,
               TERMS_CODEC_NAME,
               VERSION_START,
               VERSION_CURRENT,
@@ -146,8 +147,9 @@ public final class Lucene90BlockTreeTermsReader extends FieldsProducer {
       String indexName =
           IndexFileNames.segmentFileName(segment, state.segmentSuffix, TERMS_INDEX_EXTENSION);
       indexIn = state.directory.openInput(indexName, IOContext.LOAD);
+      IndexInput indexInClone = indexIn.clone();
       CodecUtil.checkIndexHeader(
-          indexIn,
+          indexInClone,
           TERMS_INDEX_CODEC_NAME,
           version,
           version,
@@ -249,8 +251,8 @@ public final class Lucene90BlockTreeTermsReader extends FieldsProducer {
       }
       // At this point the checksum of the meta file has been verified so the lengths are likely
       // correct
-      CodecUtil.retrieveChecksum(indexIn, indexLength);
-      CodecUtil.retrieveChecksum(termsIn, termsLength);
+      CodecUtil.retrieveChecksum(indexInClone, indexLength);
+      CodecUtil.retrieveChecksum(termsInClone, termsLength);
       fieldInfos = state.fieldInfos;
       this.fieldMap = fieldMap;
       this.fieldList = sortFieldNames(fieldMap, state.fieldInfos);
@@ -323,10 +325,10 @@ public final class Lucene90BlockTreeTermsReader extends FieldsProducer {
   @Override
   public void checkIntegrity() throws IOException {
     // terms index
-    CodecUtil.checksumEntireFile(indexIn);
+    CodecUtil.checksumEntireFile(indexIn.clone());
 
     // term dictionary
-    CodecUtil.checksumEntireFile(termsIn);
+    CodecUtil.checksumEntireFile(termsIn.clone());
 
     // postings
     postingsReader.checkIntegrity();

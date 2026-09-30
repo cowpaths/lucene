@@ -60,24 +60,26 @@ public class Lucene90PointsReader extends PointsReader {
     boolean success = false;
     try {
       indexIn = readState.directory.openInput(indexFileName, IOContext.LOAD);
+      IndexInput indexInClone = indexIn.clone();
       CodecUtil.checkIndexHeader(
-          indexIn,
+          indexInClone,
           Lucene90PointsFormat.INDEX_CODEC_NAME,
           Lucene90PointsFormat.VERSION_START,
           Lucene90PointsFormat.VERSION_CURRENT,
           readState.segmentInfo.getId(),
           readState.segmentSuffix);
-      CodecUtil.retrieveChecksum(indexIn);
+      CodecUtil.retrieveChecksum(indexInClone);
 
       dataIn = readState.directory.openInput(dataFileName, readState.context);
+      IndexInput dataInClone = dataIn.clone();
       CodecUtil.checkIndexHeader(
-          dataIn,
+          dataInClone,
           Lucene90PointsFormat.DATA_CODEC_NAME,
           Lucene90PointsFormat.VERSION_START,
           Lucene90PointsFormat.VERSION_CURRENT,
           readState.segmentInfo.getId(),
           readState.segmentSuffix);
-      CodecUtil.retrieveChecksum(dataIn);
+      CodecUtil.retrieveChecksum(dataInClone);
 
       long indexLength = -1, dataLength = -1;
       try (ChecksumIndexInput metaIn =
@@ -99,7 +101,7 @@ public class Lucene90PointsReader extends PointsReader {
             } else if (fieldNumber < 0) {
               throw new CorruptIndexException("Illegal field number: " + fieldNumber, metaIn);
             }
-            PointValues reader = new BKDReader(metaIn, indexIn, dataIn);
+            PointValues reader = new BKDReader(metaIn, indexInClone, dataIn);
             readers.put(fieldNumber, reader);
           }
           indexLength = metaIn.readLong();
@@ -112,8 +114,8 @@ public class Lucene90PointsReader extends PointsReader {
       }
       // At this point, checksums of the meta file have been validated so we
       // know that indexLength and dataLength are very likely correct.
-      CodecUtil.retrieveChecksum(indexIn, indexLength);
-      CodecUtil.retrieveChecksum(dataIn, dataLength);
+      CodecUtil.retrieveChecksum(indexInClone, indexLength);
+      CodecUtil.retrieveChecksum(dataInClone, dataLength);
       success = true;
     } finally {
       if (success == false) {
@@ -142,8 +144,8 @@ public class Lucene90PointsReader extends PointsReader {
 
   @Override
   public void checkIntegrity() throws IOException {
-    CodecUtil.checksumEntireFile(indexIn);
-    CodecUtil.checksumEntireFile(dataIn);
+    CodecUtil.checksumEntireFile(indexIn.clone());
+    CodecUtil.checksumEntireFile(dataIn.clone());
   }
 
   @Override

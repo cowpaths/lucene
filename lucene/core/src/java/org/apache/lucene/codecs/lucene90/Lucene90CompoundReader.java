@@ -76,21 +76,22 @@ final class Lucene90CompoundReader extends CompoundDirectory {
             + CodecUtil.footerLength();
 
     handle = directory.openInput(dataFileName, context);
+    IndexInput handleClone = handle.clone();
     try {
       CodecUtil.checkIndexHeader(
-          handle, Lucene90CompoundFormat.DATA_CODEC, version, version, si.getId(), "");
+          handleClone, Lucene90CompoundFormat.DATA_CODEC, version, version, si.getId(), "");
 
       // NOTE: data file is too costly to verify checksum against all the bytes on open,
       // but for now we at least verify proper structure of the checksum footer: which looks
       // for FOOTER_MAGIC + algorithmID. This is cheap and can detect some forms of corruption
       // such as file truncation.
-      CodecUtil.retrieveChecksum(handle);
+      CodecUtil.retrieveChecksum(handleClone);
 
       // We also validate length, because e.g. if you strip 16 bytes off the .cfs we otherwise
       // would not detect it:
-      if (handle.length() != expectedLength) {
+      if (handleClone.length() != expectedLength) {
         throw new CorruptIndexException(
-            "length should be " + expectedLength + " bytes, but is " + handle.length() + " instead",
+            "length should be " + expectedLength + " bytes, but is " + handleClone.length() + " instead",
             handle);
       }
 
@@ -211,6 +212,6 @@ final class Lucene90CompoundReader extends CompoundDirectory {
 
   @Override
   public void checkIntegrity() throws IOException {
-    CodecUtil.checksumEntireFile(handle);
+    CodecUtil.checksumEntireFile(handle.clone());
   }
 }

@@ -68,9 +68,10 @@ final class FieldsIndexReader extends FieldsIndex {
         dir.openInput(IndexFileNames.segmentFileName(name, suffix, extension), IOContext.LOAD);
     boolean success = false;
     try {
+      IndexInput indexInputClone = indexInput.clone();
       CodecUtil.checkIndexHeader(
-          indexInput, codecName + "Idx", VERSION_START, VERSION_CURRENT, id, suffix);
-      CodecUtil.retrieveChecksum(indexInput);
+          indexInputClone, codecName + "Idx", VERSION_START, VERSION_CURRENT, id, suffix);
+      CodecUtil.retrieveChecksum(indexInputClone);
       success = true;
     } finally {
       if (success == false) {
@@ -137,6 +138,6 @@ final class FieldsIndexReader extends FieldsIndex {
 
   @Override
   void checkIntegrity() throws IOException {
-    CodecUtil.checksumEntireFile(indexInput);
+    CodecUtil.checksumEntireFile(indexInput.clone());
   }
 }

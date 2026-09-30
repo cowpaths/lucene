@@ -82,11 +82,12 @@ final class Lucene90NormsProducer extends NormsProducer implements Cloneable {
     String dataName =
         IndexFileNames.segmentFileName(state.segmentInfo.name, state.segmentSuffix, dataExtension);
     data = state.directory.openInput(dataName, state.context);
+    IndexInput dataClone = data.clone();
     boolean success = false;
     try {
       final int version2 =
           CodecUtil.checkIndexHeader(
-              data,
+              dataClone,
               dataCodec,
               VERSION_START,
               VERSION_CURRENT,
@@ -101,7 +102,7 @@ final class Lucene90NormsProducer extends NormsProducer implements Cloneable {
       // but for now we at least verify proper structure of the checksum footer: which looks
       // for FOOTER_MAGIC + algorithmID. This is cheap and can detect some forms of corruption
       // such as file truncation.
-      CodecUtil.retrieveChecksum(data);
+      CodecUtil.retrieveChecksum(dataClone);
 
       success = true;
     } finally {
@@ -477,7 +478,7 @@ final class Lucene90NormsProducer extends NormsProducer implements Cloneable {
 
   @Override
   public void checkIntegrity() throws IOException {
-    CodecUtil.checksumEntireFile(data);
+    CodecUtil.checksumEntireFile(data.clone());
   }
 
   @Override
