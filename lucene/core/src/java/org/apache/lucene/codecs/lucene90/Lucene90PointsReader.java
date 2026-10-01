@@ -101,7 +101,7 @@ public class Lucene90PointsReader extends PointsReader {
             } else if (fieldNumber < 0) {
               throw new CorruptIndexException("Illegal field number: " + fieldNumber, metaIn);
             }
-            PointValues reader = new BKDReader(metaIn, indexInClone, dataIn);
+            PointValues reader = new BKDReader(metaIn, indexIn, dataIn);
             readers.put(fieldNumber, reader);
           }
           indexLength = metaIn.readLong();
