@@ -89,12 +89,12 @@ public final class FieldReader extends Terms {
         readVLongOutput(new ByteArrayDataInput(rootCode.bytes, rootCode.offset, rootCode.length))
             >>> Lucene90BlockTreeTermsReader.OUTPUT_FLAGS_NUM_BITS;
     // Initialize FST always off-heap.
-    final IndexInput clone = indexIn.clone();
-    clone.seek(indexStartFP);
+    // don't clone the input; it will be sliced by absolute offset before being used anyway
+    indexIn.seek(indexStartFP);
     index =
         new FST<>(
             FST.readMetadata(metaIn, ByteSequenceOutputs.getSingleton()),
-            clone,
+            indexIn,
             new OffHeapFSTStore());
     /*
      if (false) {
