@@ -572,6 +572,9 @@ public class ConcurrentMergeScheduler extends MergeScheduler {
 
       boolean success = false;
       try {
+        if (maybeStall(merge) == false) {
+          return;
+        }
         // OK to spawn a new merge thread to handle this
         // merge:
         final MergeThread newMergeThread = getMergeThread(mergeSource, merge);
@@ -590,6 +593,7 @@ public class ConcurrentMergeScheduler extends MergeScheduler {
       } finally {
         if (!success) {
           mergeSource.onMergeFinished(merge);
+          postMerge(merge);
         }
       }
     }
@@ -642,6 +646,15 @@ public class ConcurrentMergeScheduler extends MergeScheduler {
     return true;
   }
 
+  /**
+   * Hook for subclasses to stall before spawning a merge thread. Return {@code false} if the merge
+   * should not be started (e.g. aborted, or caller is a merge thread that must not block). The
+   * caller will invoke {@link MergeSource#onMergeFinished} and {@link #postMerge}.
+   */
+  protected synchronized boolean maybeStall(OneMerge merge) {
+    return true;
+  }
+
   /** Called from {@link #maybeStall} to pause the calling thread for a bit. */
   protected synchronized void doStall() {
     try {
@@ -669,14 +682,14 @@ public class ConcurrentMergeScheduler extends MergeScheduler {
     return thread;
   }
 
-  synchronized void runOnMergeFinished(MergeSource mergeSource) {
+  synchronized void runOnMergeFinished(MergeThread mergeThread) {
     // the merge call as well as the merge thread handling in the finally
     // block must be sync'd on CMS otherwise stalling decisions might cause
     // us to miss pending merges
     assert mergeThreads.contains(Thread.currentThread()) : "caller is not a merge thread";
     // Let CMS run new merges if necessary:
     try {
-      merge(mergeSource, MergeTrigger.MERGE_FINISHED);
+      merge(mergeThread.mergeSource, MergeTrigger.MERGE_FINISHED);
     } catch (
         @SuppressWarnings("unused")
         AlreadyClosedException ace) {
@@ -734,7 +747,7 @@ public class ConcurrentMergeScheduler extends MergeScheduler {
                   rateToString(rateLimiter.getMBPerSec())));
         }
 
-        runOnMergeFinished(mergeSource);
+        runOnMergeFinished(this);
 
         if (verbose()) {
           message(String.format(Locale.ROOT, "merge thread %s end", this.getName()));
@@ -747,8 +760,19 @@ public class ConcurrentMergeScheduler extends MergeScheduler {
           // testing.
           handleMergeException(exc);
         }
+      } finally {
+        postMerge(merge);
       }
     }
+  }
+
+  /**
+   * Cleanup after the merge attempt finishes, whether it was successful or not.
+   * <br>
+   * This could be called multiple times hence should be idempotent
+   */
+  protected void postMerge(OneMerge merge) {
+    //hook for subclass to do clean up on mergeThread completion - whether it was successful or not
   }
 
   /** Called when an exception is hit in a background merge thread */
