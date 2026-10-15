@@ -36,14 +36,6 @@ public interface BlockCacheMapping extends Closeable {
   ByteBuffer[] dataPool();
 
   /**
-   * Hints that block {@code blockIdx} will be needed soon ({@code MADV_WILLNEED}), with
-   * {@code length} bytes of useful data. Implementations may use the length to avoid paging in
-   * unused trailing bytes on tail blocks. Returns the syscall return value (0 = success), or 0
-   * in the default no-op implementation.
-   */
-  default int loadHint(int blockIdx, int length) { return 0; }
-
-  /**
    * Issues {@code MADV_WILLNEED} on an arbitrary native address range, independent of the cache
    * file block layout. Address and length need not be page-aligned; alignment is handled
    * internally by the implementation. Returns the syscall return value (0 = success), or 0 in

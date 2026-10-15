@@ -232,11 +232,6 @@ final class LinuxMadvise implements BlockCacheMmapProvider {
     }
 
     @Override
-    public int loadHint(int blockIdx, int length) {
-      return madvise(blockIdx, MADV_WILLNEED, length);
-    }
-
-    @Override
     public int willneed(long address, long length) {
       try {
         long alignedAddr = address & ~PAGE_MASK;
