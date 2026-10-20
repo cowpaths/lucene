@@ -56,8 +56,10 @@ public final class OffHeapStores {
    * Attempts the one-shot, JVM-wide claim on a real {@code MemorySegment}-backed {@link
    * OffHeapStore} of exactly {@code totalBytes} bytes, aligned to {@code alignment}. Returns the
    * claimed store on success, or {@code null} if this JVM already has a (successful or attempted)
-   * claim in progress/complete, or if the JDK21+ implementation class can't be loaded (e.g. an
-   * older JDK) -- callers must fall back to {@link #createByteBuffer} in either {@code null} case.
+   * claim in progress/complete, or if the JDK21+ implementation class can't be loaded or
+   * initialized for any reason (e.g. an older JDK missing the FFM API entirely, or a newer JDK
+   * whose FFM API has since changed incompatibly -- see the {@code LinkageError} catch below) --
+   * callers must fall back to {@link #createByteBuffer} in every {@code null} case.
    *
    * <p>Protocol: {@link #CLAIMED} is a single {@link AtomicBoolean} gate shared across every
    * caller in the JVM (there is deliberately only one -- see {@code
@@ -84,6 +86,18 @@ public final class OffHeapStores {
       Class<?> cls = Class.forName(MEMORY_SEGMENT_IMPL_CLASS);
       return (OffHeapStore) cls.getConstructor().newInstance();
     } catch (@SuppressWarnings("unused") ReflectiveOperationException e) {
+      return null;
+    } catch (@SuppressWarnings("unused") LinkageError e) {
+      // TODO: ValueLayout.arrayElementVarHandle(int...) (used by MemorySegmentOffHeapStore) was
+      // removed in JDK 22, replaced by MemoryLayout.arrayElementVarHandle(PathElement...) -- on
+      // JDK 22+ this manifests as a NoSuchMethodError (a LinkageError, not a
+      // ReflectiveOperationException) thrown from MemorySegmentOffHeapStore's static initializer,
+      // which the catch clause above alone would not catch, crashing the caller instead of falling
+      // back gracefully. Once this module targets JDK 22+ (a new src/java22 MR-JAR source set,
+      // its own extracted apijar, etc.), update MemorySegmentOffHeapStore to use the new API and
+      // this catch can be narrowed back down (or removed, if no other LinkageError is plausible by
+      // then). Until then, catching LinkageError here ensures any such failure degrades to the
+      // documented createByteBuffer fallback instead of propagating as an uncaught Error.
       return null;
     } finally {
       System.clearProperty(TOTAL_BYTES_SYSPROP);
