@@ -30,6 +30,12 @@ import java.nio.ByteOrder;
  * future Holder-pattern singleton factory is in place, the implementation handed to every caller
  * after the first (see {@link OffHeapStores}'s class javadoc).
  *
+ * <p>{@code byteBufferViewVarHandle}'s own coordinate is a raw byte offset, unlike {@code
+ * MemorySegmentOffHeapStore}'s {@code arrayElementVarHandle} (a scaled element index) -- so unlike
+ * that implementation, every accessor here must convert {@link OffHeapStore}'s element-indexed
+ * {@code intIndex}/{@code longIndex} parameters (see that interface's javadoc) to a byte offset via
+ * a fixed left-shift before the VarHandle call.
+ *
  * <p>Allocates its own dedicated {@link ByteBuffer} per instance (one per {@link
  * OffHeapStores#create} call).
  */
@@ -50,42 +56,42 @@ final class ByteBufferOffHeapStore implements OffHeapStore {
   }
 
   @Override
-  public int getIntVolatile(long offset) {
-    return (int) INT_VH.getVolatile(buf, Math.toIntExact(offset));
+  public int getIntVolatile(long intIndex) {
+    return (int) INT_VH.getVolatile(buf, Math.toIntExact(intIndex << 2));
   }
 
   @Override
-  public void putInt(long offset, int value) {
-    INT_VH.set(buf, Math.toIntExact(offset), value);
+  public void putInt(long intIndex, int value) {
+    INT_VH.set(buf, Math.toIntExact(intIndex << 2), value);
   }
 
   @Override
-  public void putIntVolatile(long offset, int value) {
-    INT_VH.setVolatile(buf, Math.toIntExact(offset), value);
+  public void putIntVolatile(long intIndex, int value) {
+    INT_VH.setVolatile(buf, Math.toIntExact(intIndex << 2), value);
   }
 
   @Override
-  public boolean compareAndSetInt(long offset, int expect, int update) {
-    return INT_VH.compareAndSet(buf, Math.toIntExact(offset), expect, update);
+  public boolean compareAndSetInt(long intIndex, int expect, int update) {
+    return INT_VH.compareAndSet(buf, Math.toIntExact(intIndex << 2), expect, update);
   }
 
   @Override
-  public int compareAndExchangeInt(long offset, int expect, int update) {
-    return (int) INT_VH.compareAndExchange(buf, Math.toIntExact(offset), expect, update);
+  public int compareAndExchangeInt(long intIndex, int expect, int update) {
+    return (int) INT_VH.compareAndExchange(buf, Math.toIntExact(intIndex << 2), expect, update);
   }
 
   @Override
-  public long getLongVolatile(long offset) {
-    return (long) LONG_VH.getVolatile(buf, Math.toIntExact(offset));
+  public long getLongVolatile(long longIndex) {
+    return (long) LONG_VH.getVolatile(buf, Math.toIntExact(longIndex << 3));
   }
 
   @Override
-  public long getLong(long offset) {
-    return (long) LONG_VH.get(buf, Math.toIntExact(offset));
+  public long getLong(long longIndex) {
+    return (long) LONG_VH.get(buf, Math.toIntExact(longIndex << 3));
   }
 
   @Override
-  public void putLong(long offset, long value) {
-    LONG_VH.set(buf, Math.toIntExact(offset), value);
+  public void putLong(long longIndex, long value) {
+    LONG_VH.set(buf, Math.toIntExact(longIndex << 3), value);
   }
 }

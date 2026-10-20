@@ -28,48 +28,65 @@ package org.apache.lucene.store;
  *       MemorySegmentOffHeapStore}'s javadoc for the specific shape chosen and why.
  * </ul>
  *
- * <p>All operations take a {@code long offset} relative to whatever region this specific store
- * <em>instance</em> represents. A store obtained directly from {@link OffHeapStores} is addressed
- * from offset 0. A caller sharing one store across multiple regions (each with its own {@code
- * final long baseOffset} into the shared store) adds that offset at each call site itself -- a
- * bare primitive field, never wrapped in an object, which benchmarking showed matters for JIT
- * constant-folding of the backing store reference (see {@code solr/prodbench/FINDINGS.md}).
+ * <p><b>Indexing is element-based, not byte-based:</b> int-typed methods ({@code getIntVolatile},
+ * {@code putInt}, etc.) take an {@code intIndex} (the address of the target int, counted in 4-byte
+ * words from the start of whatever region this store <em>instance</em> represents); long-typed
+ * methods take a {@code longIndex} (counted in 8-byte words). This matches the one implementation
+ * ({@code MemorySegmentOffHeapStore}, via {@code ValueLayout.arrayElementVarHandle}) whose native
+ * coordinate is itself a scaled element index rather than a raw byte offset -- putting the
+ * conversion at the external API boundary means that implementation's hot-path methods need zero
+ * conversion at all, while the other two implementations ({@code UnsafeOffHeapStore}, {@code
+ * ByteBufferOffHeapStore}, both natively byte-addressed) each pay one cheap, fixed left-shift
+ * (`intIndex &lt;&lt; 2` / `longIndex &lt;&lt; 3`) per call instead.
+ *
+ * <p>A caller addressing a specific byte-level field offset (e.g. a field at a fixed byte offset
+ * within a larger stride) must itself already know that offset is a multiple of 4 (for int-typed
+ * methods) or 8 (for long-typed methods) -- true of every field this interface's existing callers
+ * address -- and convert via a right-shift (`byteOffset &gt;&gt;&gt; 2` / `byteOffset &gt;&gt;&gt;
+ * 3`) before calling in, exactly once, at the point where a byte-level constant is combined with a
+ * slot's base index.
+ *
+ * <p>A store obtained directly from {@link OffHeapStores} is addressed from index 0. A caller
+ * sharing one store across multiple regions (each with its own {@code final long baseIndex} into
+ * the shared store, itself already in the same index units) adds that base index at each call site
+ * itself -- a bare primitive field, never wrapped in an object, for JIT constant-folding of the
+ * backing store reference.
  *
  * <p>Method semantics (plain vs. volatile vs. compare-and-swap/exchange) exactly match {@code
  * sun.misc.Unsafe}'s own naming and behavior, since every implementation must support the
  * identical access patterns callers already rely on.
  */
 public interface OffHeapStore {
-  /** Volatile read of a 4-byte int at {@code offset}. */
-  int getIntVolatile(long offset);
+  /** Volatile read of the 4-byte int at {@code intIndex} (a 4-byte-word-granular index). */
+  int getIntVolatile(long intIndex);
 
-  /** Plain (non-atomic, non-volatile) write of a 4-byte int at {@code offset}. */
-  void putInt(long offset, int value);
+  /** Plain (non-atomic, non-volatile) write of the 4-byte int at {@code intIndex}. */
+  void putInt(long intIndex, int value);
 
-  /** Volatile write of a 4-byte int at {@code offset}. */
-  void putIntVolatile(long offset, int value);
+  /** Volatile write of the 4-byte int at {@code intIndex}. */
+  void putIntVolatile(long intIndex, int value);
 
   /**
-   * Atomically sets the int at {@code offset} to {@code update} if it currently equals {@code
+   * Atomically sets the int at {@code intIndex} to {@code update} if it currently equals {@code
    * expect}, returning {@code true} iff the exchange succeeded -- same semantics as {@code
    * VarHandle.compareAndSet}.
    */
-  boolean compareAndSetInt(long offset, int expect, int update);
+  boolean compareAndSetInt(long intIndex, int expect, int update);
 
   /**
-   * Atomically sets the int at {@code offset} to {@code update} if it currently equals {@code
+   * Atomically sets the int at {@code intIndex} to {@code update} if it currently equals {@code
    * expect}, returning the witness value (the value observed immediately before this call, which
    * equals {@code expect} iff the exchange succeeded) -- same semantics as {@code
    * VarHandle.compareAndExchange}.
    */
-  int compareAndExchangeInt(long offset, int expect, int update);
+  int compareAndExchangeInt(long intIndex, int expect, int update);
 
-  /** Volatile read of an 8-byte long at {@code offset}. */
-  long getLongVolatile(long offset);
+  /** Volatile read of the 8-byte long at {@code longIndex} (an 8-byte-word-granular index). */
+  long getLongVolatile(long longIndex);
 
-  /** Plain (non-atomic, non-volatile) read of an 8-byte long at {@code offset}. */
-  long getLong(long offset);
+  /** Plain (non-atomic, non-volatile) read of the 8-byte long at {@code longIndex}. */
+  long getLong(long longIndex);
 
-  /** Plain (non-atomic, non-volatile) write of an 8-byte long at {@code offset}. */
-  void putLong(long offset, long value);
+  /** Plain (non-atomic, non-volatile) write of the 8-byte long at {@code longIndex}. */
+  void putLong(long longIndex, long value);
 }
