@@ -17,64 +17,90 @@
 
 package org.apache.lucene.store;
 
-import java.lang.reflect.Constructor;
 import java.nio.ByteBuffer;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * Factory for {@link OffHeapStore} instances. Prefers a {@code MemorySegment}-backed
- * implementation (JDK 21+, loaded reflectively -- see below) and falls back to a plain {@link
- * ByteBuffer}-backed implementation ({@link ByteBufferOffHeapStore}, always available) when the
- * former can't be loaded, mirroring exactly {@link BlockCacheMmapProvider#getDefault()}'s
- * reflective-load-with-fallback shape for {@code LinuxMadvise}/{@link MappedByteBufferProvider}.
+ * Factory helpers for {@link OffHeapStore} instances.
  *
- * <p><b>Current status (stepping stone):</b> this factory does not yet implement the eventual
- * Holder-pattern singleton selection (first caller gets a JIT-foldable {@code static final}
- * instance; subsequent callers get a generic, non-static-final-backed instance -- see {@code
- * solr/prodbench/FINDINGS.md} for why that split matters for a {@code MemorySegment}-backed store
- * specifically). {@link #create} simply constructs a fresh instance on every call. The Holder split
- * is deferred until real multi-partition usage (e.g. Solr's {@code BlockCache}) is wired up against
- * this factory -- premature here, since there is no real caller yet to validate the split against.
+ * <p>{@code MemorySegmentOffHeapStore} (JDK 21+, loaded reflectively -- not referenced by name
+ * from this class's compiled bytecode, since it lives in this module's {@code src/java21} MR-JAR
+ * source set) holds its single backing {@code MemorySegment} in a {@code static final} field --
+ * see that class's javadoc for why a {@code static final} field (not an instance field) is
+ * necessary for its benchmarked performance. A {@code static final} field can only be sized once,
+ * at class-initialization time, with no constructor parameters -- so at most <em>one</em> caller,
+ * JVM-wide, can ever have its requested size honored by a real {@code MemorySegment}. {@link
+ * #tryClaimMemorySegment} implements that one-shot claim: the first caller to invoke it (if the
+ * class loads successfully at all) wins and gets a working {@code MemorySegmentOffHeapStore} sized
+ * exactly as requested; every other caller (whether before, during, or after that first successful
+ * claim) gets {@code null} and must fall back to {@link #createByteBuffer} (always available, on
+ * any JDK, any number of times).
  */
 public final class OffHeapStores {
   private static final String MEMORY_SEGMENT_IMPL_CLASS =
       "org.apache.lucene.store.MemorySegmentOffHeapStore";
 
-  private static final Constructor<? extends OffHeapStore> MEMORY_SEGMENT_CTOR =
-      lookupMemorySegmentCtor();
+  // These two sysprop name literals MUST exactly match MemorySegmentOffHeapStore's own
+  // TOTAL_BYTES_SYSPROP/ALIGNMENT_SYSPROP (src/java21) -- see that class's matching comment for
+  // why they cannot be shared via a real constant reference across the two source sets.
+  private static final String TOTAL_BYTES_SYSPROP =
+      "org.apache.lucene.store.MemorySegmentOffHeapStore.totalBytes";
+  private static final String ALIGNMENT_SYSPROP =
+      "org.apache.lucene.store.MemorySegmentOffHeapStore.alignment";
 
-  @SuppressWarnings("unchecked")
-  private static Constructor<? extends OffHeapStore> lookupMemorySegmentCtor() {
-    try {
-      Class<?> cls = Class.forName(MEMORY_SEGMENT_IMPL_CLASS);
-      return (Constructor<? extends OffHeapStore>)
-          cls.getConstructor(int.class, int.class, int.class);
-    } catch (@SuppressWarnings("unused") ReflectiveOperationException e) {
-      return null;
-    }
-  }
+  private static final AtomicBoolean CLAIMED = new AtomicBoolean();
 
   private OffHeapStores() {}
 
   /**
-   * Allocates a new {@link OffHeapStore} with at least {@code slots * stride} bytes of backing
-   * storage, aligned to a full {@code alignment}-byte boundary (a hard guarantee -- see {@code
-   * Cache2#allocateAlignedDirect}'s javadoc in {@code solr/core} for the margin/rounding rationale
-   * this mirrors).
+   * Attempts the one-shot, JVM-wide claim on a real {@code MemorySegment}-backed {@link
+   * OffHeapStore} of exactly {@code totalBytes} bytes, aligned to {@code alignment}. Returns the
+   * claimed store on success, or {@code null} if this JVM already has a (successful or attempted)
+   * claim in progress/complete, or if the JDK21+ implementation class can't be loaded (e.g. an
+   * older JDK) -- callers must fall back to {@link #createByteBuffer} in either {@code null} case.
+   *
+   * <p>Protocol: {@link #CLAIMED} is a single {@link AtomicBoolean} gate shared across every
+   * caller in the JVM (there is deliberately only one -- see {@code
+   * Cache2#allocateSharedGroup1And2Stores}'s javadoc in {@code solr/core} for why a single combined
+   * claim, rather than one per logical region, is the right granularity). The winner of the
+   * {@code compareAndSet} race sets {@link #TOTAL_BYTES_SYSPROP}/{@link #ALIGNMENT_SYSPROP} to its
+   * own requested size, then triggers the implementation class's first-ever {@code Class.forName}
+   * load -- since {@link #CLAIMED} guarantees only one thread, ever, reaches this point (combined
+   * with the JVM's own guarantee that a class's static initializer runs at most once, synchronized
+   * against concurrent initializers of the <em>same</em> class), the implementation class's {@code
+   * static final} segment field reads exactly the one set of sysprop values meant for it, with no
+   * possibility of a second caller's values racing in first. The sysprops are cleared in a {@code
+   * finally} block immediately after the load attempt -- harmless either way by that point, since
+   * the static initializer (if it ran) already captured the values it needed; clearing avoids
+   * leaving stale/misleading system properties behind for unrelated later inspection.
    */
-  public static OffHeapStore create(int slots, int stride, int alignment) {
-    if (MEMORY_SEGMENT_CTOR != null) {
-      try {
-        return MEMORY_SEGMENT_CTOR.newInstance(slots, stride, alignment);
-      } catch (@SuppressWarnings("unused") ReflectiveOperationException ignored) {
-        // Fall through to the ByteBuffer fallback below -- e.g. a JDK whose MR-JAR versioned
-        // class loaded but whose runtime behavior didn't match expectations.
-      }
+  public static OffHeapStore tryClaimMemorySegment(long totalBytes, int alignment) {
+    if (!CLAIMED.compareAndSet(false, true)) {
+      return null;
     }
-    return new ByteBufferOffHeapStore(allocateAlignedDirect(slots, stride, alignment));
+    System.setProperty(TOTAL_BYTES_SYSPROP, Long.toString(totalBytes));
+    System.setProperty(ALIGNMENT_SYSPROP, Integer.toString(alignment));
+    try {
+      Class<?> cls = Class.forName(MEMORY_SEGMENT_IMPL_CLASS);
+      return (OffHeapStore) cls.getConstructor().newInstance();
+    } catch (@SuppressWarnings("unused") ReflectiveOperationException e) {
+      return null;
+    } finally {
+      System.clearProperty(TOTAL_BYTES_SYSPROP);
+      System.clearProperty(ALIGNMENT_SYSPROP);
+    }
   }
 
-  private static ByteBuffer allocateAlignedDirect(int slots, int stride, int alignment) {
+  /**
+   * Allocates a new {@link ByteBufferOffHeapStore} with at least {@code slots * stride} bytes of
+   * backing storage, aligned to a full {@code alignment}-byte boundary (a hard guarantee -- see
+   * {@code Cache2#allocateAlignedDirect}'s javadoc in {@code solr/core} for the margin/rounding
+   * rationale this mirrors). Always available, on any JDK, any number of times -- the fallback for
+   * every caller {@link #tryClaimMemorySegment} returns {@code null} to.
+   */
+  public static OffHeapStore createByteBuffer(int slots, int stride, int alignment) {
     int needed = Math.multiplyExact(slots, stride);
-    return ByteBuffer.allocateDirect(needed + 2 * (alignment - 1)).alignedSlice(alignment);
+    ByteBuffer buf = ByteBuffer.allocateDirect(needed + 2 * (alignment - 1)).alignedSlice(alignment);
+    return new ByteBufferOffHeapStore(buf);
   }
 }
