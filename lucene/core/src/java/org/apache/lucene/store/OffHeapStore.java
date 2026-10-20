@@ -89,4 +89,12 @@ public interface OffHeapStore {
 
   /** Plain (non-atomic, non-volatile) write of the 8-byte long at {@code longIndex}. */
   void putLong(long longIndex, long value);
+
+  /**
+   * Atomically sets the long at {@code longIndex} to {@code value} and returns the previous value
+   * -- same semantics as {@code VarHandle.getAndSet} (a full read-modify-write with volatile
+   * memory ordering, i.e. equivalent to a {@link #getLongVolatile} immediately followed by a
+   * volatile write, but as a single atomic operation).
+   */
+  long getAndSetLong(long longIndex, long value);
 }

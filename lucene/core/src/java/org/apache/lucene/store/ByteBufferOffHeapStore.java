@@ -99,4 +99,9 @@ final class ByteBufferOffHeapStore implements OffHeapStore {
   public void putLong(long longIndex, long value) {
     LONG_VH.set(buf, (int) (longIndex << 3), value);
   }
+
+  @Override
+  public long getAndSetLong(long longIndex, long value) {
+    return (long) LONG_VH.getAndSet(buf, (int) (longIndex << 3), value);
+  }
 }

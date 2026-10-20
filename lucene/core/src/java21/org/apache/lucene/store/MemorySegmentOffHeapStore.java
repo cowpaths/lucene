@@ -133,4 +133,9 @@ final class MemorySegmentOffHeapStore implements OffHeapStore {
   public void putLong(long longIndex, long value) {
     LONG_VH.set(SEGMENT, longIndex, value);
   }
+
+  @Override
+  public long getAndSetLong(long longIndex, long value) {
+    return (long) LONG_VH.getAndSet(SEGMENT, longIndex, value);
+  }
 }
