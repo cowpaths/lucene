@@ -108,11 +108,12 @@ final class Lucene90DocValuesProducer extends DocValuesProducer {
     String dataName =
         IndexFileNames.segmentFileName(state.segmentInfo.name, state.segmentSuffix, dataExtension);
     this.data = state.directory.openInput(dataName, state.context);
+    IndexInput dataClone = this.data.clone();
     boolean success = false;
     try {
       final int version2 =
           CodecUtil.checkIndexHeader(
-              data,
+              dataClone,
               dataCodec,
               Lucene90DocValuesFormat.VERSION_START,
               Lucene90DocValuesFormat.VERSION_CURRENT,
@@ -127,7 +128,7 @@ final class Lucene90DocValuesProducer extends DocValuesProducer {
       // but for now we at least verify proper structure of the checksum footer: which looks
       // for FOOTER_MAGIC + algorithmID. This is cheap and can detect some forms of corruption
       // such as file truncation.
-      CodecUtil.retrieveChecksum(data);
+      CodecUtil.retrieveChecksum(dataClone);
 
       success = true;
     } finally {
@@ -1642,7 +1643,7 @@ final class Lucene90DocValuesProducer extends DocValuesProducer {
 
   @Override
   public void checkIntegrity() throws IOException {
-    CodecUtil.checksumEntireFile(data);
+    CodecUtil.checksumEntireFile(data.clone());
   }
 
   /**

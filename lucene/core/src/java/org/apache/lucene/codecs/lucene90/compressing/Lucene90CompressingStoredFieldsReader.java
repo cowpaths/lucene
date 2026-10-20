@@ -129,11 +129,12 @@ public final class Lucene90CompressingStoredFieldsReader extends StoredFieldsRea
     try {
       // Open the data file
       fieldsStream = d.openInput(fieldsStreamFN, context.withRandomAccess());
+      IndexInput fieldsStreamClone = fieldsStream.clone();
       version =
           CodecUtil.checkIndexHeader(
-              fieldsStream, formatName, VERSION_START, VERSION_CURRENT, si.getId(), segmentSuffix);
+              fieldsStreamClone, formatName, VERSION_START, VERSION_CURRENT, si.getId(), segmentSuffix);
       assert CodecUtil.indexHeaderLength(formatName, segmentSuffix)
-          == fieldsStream.getFilePointer();
+          == fieldsStreamClone.getFilePointer();
 
       final String metaStreamFN =
           IndexFileNames.segmentFileName(segment, segmentSuffix, META_EXTENSION);
@@ -156,7 +157,7 @@ public final class Lucene90CompressingStoredFieldsReader extends StoredFieldsRea
       // but for now we at least verify proper structure of the checksum footer: which looks
       // for FOOTER_MAGIC + algorithmID. This is cheap and can detect some forms of corruption
       // such as file truncation.
-      CodecUtil.retrieveChecksum(fieldsStream);
+      CodecUtil.retrieveChecksum(fieldsStreamClone);
 
       long maxPointer = -1;
       FieldsIndex indexReader = null;
@@ -722,7 +723,7 @@ public final class Lucene90CompressingStoredFieldsReader extends StoredFieldsRea
   @Override
   public void checkIntegrity() throws IOException {
     indexReader.checkIntegrity();
-    CodecUtil.checksumEntireFile(fieldsStream);
+    CodecUtil.checksumEntireFile(fieldsStream.clone());
   }
 
   @Override

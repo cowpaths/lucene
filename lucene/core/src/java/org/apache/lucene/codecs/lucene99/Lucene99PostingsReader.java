@@ -76,24 +76,26 @@ public final class Lucene99PostingsReader extends PostingsReaderBase {
             state.segmentInfo.name, state.segmentSuffix, Lucene99PostingsFormat.DOC_EXTENSION);
     try {
       docIn = state.directory.openInput(docName, state.context);
+      IndexInput docInClone = docIn.clone();
       version =
           CodecUtil.checkIndexHeader(
-              docIn,
+              docInClone,
               DOC_CODEC,
               VERSION_START,
               VERSION_CURRENT,
               state.segmentInfo.getId(),
               state.segmentSuffix);
-      CodecUtil.retrieveChecksum(docIn);
+      CodecUtil.retrieveChecksum(docInClone);
 
       if (state.fieldInfos.hasProx()) {
         String proxName =
             IndexFileNames.segmentFileName(
                 state.segmentInfo.name, state.segmentSuffix, Lucene99PostingsFormat.POS_EXTENSION);
         posIn = state.directory.openInput(proxName, state.context);
+        IndexInput posInClone = posIn.clone();
         CodecUtil.checkIndexHeader(
-            posIn, POS_CODEC, version, version, state.segmentInfo.getId(), state.segmentSuffix);
-        CodecUtil.retrieveChecksum(posIn);
+            posInClone, POS_CODEC, version, version, state.segmentInfo.getId(), state.segmentSuffix);
+        CodecUtil.retrieveChecksum(posInClone);
 
         if (state.fieldInfos.hasPayloads() || state.fieldInfos.hasOffsets()) {
           String payName =
@@ -102,9 +104,10 @@ public final class Lucene99PostingsReader extends PostingsReaderBase {
                   state.segmentSuffix,
                   Lucene99PostingsFormat.PAY_EXTENSION);
           payIn = state.directory.openInput(payName, state.context);
+          IndexInput payInClone = payIn.clone();
           CodecUtil.checkIndexHeader(
-              payIn, PAY_CODEC, version, version, state.segmentInfo.getId(), state.segmentSuffix);
-          CodecUtil.retrieveChecksum(payIn);
+              payInClone, PAY_CODEC, version, version, state.segmentInfo.getId(), state.segmentSuffix);
+          CodecUtil.retrieveChecksum(payInClone);
         }
       }
 
@@ -2027,13 +2030,13 @@ public final class Lucene99PostingsReader extends PostingsReaderBase {
   @Override
   public void checkIntegrity() throws IOException {
     if (docIn != null) {
-      CodecUtil.checksumEntireFile(docIn);
+      CodecUtil.checksumEntireFile(docIn.clone());
     }
     if (posIn != null) {
-      CodecUtil.checksumEntireFile(posIn);
+      CodecUtil.checksumEntireFile(posIn.clone());
     }
     if (payIn != null) {
-      CodecUtil.checksumEntireFile(payIn);
+      CodecUtil.checksumEntireFile(payIn.clone());
     }
   }
 
